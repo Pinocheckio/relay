@@ -464,15 +464,9 @@ html, body {
   box-shadow: var(--shadow);
 }
 
-.btn-ptt-nl {
-  background: var(--ptt-nl);
-  color: #fff;
-}
-
-.btn-ptt-fa {
-  background: var(--ptt-fa);
-  color: #fff;
-}
+.btn-ptt-nl { background: var(--ptt-nl); color: #fff; }
+.btn-ptt-fa { background: var(--ptt-fa); color: #fff; }
+.btn-ptt-en { background: #059669; color: #fff; }
 
 .btn-ptt:active, .btn-ptt.recording {
   background: var(--ptt-recording) !important;

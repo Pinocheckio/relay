@@ -76,8 +76,10 @@ const statusEl = document.getElementById('status-text');
 const langEl = document.getElementById('lang-detected');
 const modeAutoBtn = document.getElementById('btn-mode-auto');
 const modeManuBtn = document.getElementById('btn-mode-manual');
-const pttNlBtn = document.getElementById('btn-ptt-nl');
-const pttFaBtn = document.getElementById('btn-ptt-fa');
+const pttABtn = document.getElementById('btn-ptt-a');
+const pttBBtn = document.getElementById('btn-ptt-b');
+const pttALabel = document.getElementById('ptt-a-label');
+const pttBLabel = document.getElementById('ptt-b-label');
 const pttControls = document.getElementById('ptt-controls');
 const generateReportBtn = document.getElementById('btn-generate-report');
 const reportPanel = document.getElementById('report-panel');
@@ -442,6 +444,15 @@ connectBtn.addEventListener('click', () => {
 modeAutoBtn.addEventListener('click', () => setMode('auto'));
 modeManuBtn.addEventListener('click', () => setMode('manual'));
 
+function updatePttLabels(pair) {
+  const [a, b] = pair.split('-');
+  pttALabel.textContent = a.toUpperCase();
+  pttBLabel.textContent = b.toUpperCase();
+  // Update button color class to match language
+  pttABtn.className = `btn-ptt btn-ptt-${a}`;
+  pttBBtn.className = `btn-ptt btn-ptt-${b}`;
+}
+
 document.querySelectorAll('.pair-toggle .btn-mode').forEach(btn => {
   btn.addEventListener('click', () => {
     const pair = btn.dataset.pair;
@@ -449,18 +460,19 @@ document.querySelectorAll('.pair-toggle .btn-mode').forEach(btn => {
     currentPair = pair;
     document.querySelectorAll('.pair-toggle .btn-mode').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
+    updatePttLabels(pair);
     sendWs({ type: 'set_pair', pair });
   });
 });
 
-// PTT: mouse + touch support
+// PTT: mouse + touch support — language determined by current pair
 ['mousedown', 'touchstart'].forEach(evt => {
-  pttNlBtn.addEventListener(evt, (e) => { e.preventDefault(); pttStart('nl'); });
-  pttFaBtn.addEventListener(evt, (e) => { e.preventDefault(); pttStart('fa'); });
+  pttABtn.addEventListener(evt, (e) => { e.preventDefault(); pttStart(currentPair.split('-')[0]); });
+  pttBBtn.addEventListener(evt, (e) => { e.preventDefault(); pttStart(currentPair.split('-')[1]); });
 });
 ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(evt => {
-  pttNlBtn.addEventListener(evt, () => pttEnd('nl'));
-  pttFaBtn.addEventListener(evt, () => pttEnd('fa'));
+  pttABtn.addEventListener(evt, () => pttEnd(currentPair.split('-')[0]));
+  pttBBtn.addEventListener(evt, () => pttEnd(currentPair.split('-')[1]));
 });
 
 generateReportBtn.addEventListener('click', () => {
@@ -477,3 +489,4 @@ copyReportBtn.addEventListener('click', () => {
 // ── Init ──────────────────────────────────────────────────────────────────
 
 setMode('auto');
+updatePttLabels(currentPair);
