@@ -6,6 +6,7 @@ const SCRIBE_URL = 'wss://api.elevenlabs.io/v1/speech-to-text/realtime';
 const TOKEN_URL = 'https://api.elevenlabs.io/v1/single-use-token/realtime_scribe';
 const RECONNECT_DELAY_MS = 2000;
 const MAX_RECONNECT_ATTEMPTS = 5;
+const SAMPLE_RATE = 16000;
 
 async function fetchSingleUseToken(apiKey: string): Promise<string> {
   const res = await fetch(TOKEN_URL, {
@@ -56,14 +57,16 @@ export class SttClient extends EventEmitter {
     const params = new URLSearchParams({
       model_id: 'scribe_v2_realtime',
       token,
-      audio_format: 'pcm_16000',
+      audio_format: `pcm_${SAMPLE_RATE}`,
       commit_strategy: this.mode === 'auto' ? 'vad' : 'manual',
+      include_language_detection: 'true',
       include_timestamps: 'true',
-      vad_silence_threshold_secs: '1.5',
+      vad_silence_threshold_secs: '1.0',
+      vad_threshold: '0.3',
     });
 
     const url = `${SCRIBE_URL}?${params.toString()}`;
-    console.log('[stt] connecting to ElevenLabs Scribe...');
+    console.log('[stt] connecting...');
 
     this.ws = new WebSocket(url);
 
@@ -104,7 +107,10 @@ export class SttClient extends EventEmitter {
   }
 
   private _handleMessage(msg: Record<string, unknown>): void {
-    switch (msg.type) {
+    // ElevenLabs uses message_type field
+    const msgType = (msg.message_type ?? msg.type) as string | undefined;
+
+    switch (msgType) {
       case 'session_started':
         console.log('[stt] session started');
         break;
@@ -130,7 +136,24 @@ export class SttClient extends EventEmitter {
         break;
       }
 
+      // Surface all error variants
+      case 'error':
+      case 'auth_error':
+      case 'quota_exceeded':
+      case 'rate_limited':
+      case 'insufficient_audio_activity':
+      case 'input_error':
+      case 'chunk_size_exceeded':
+      case 'transcriber_error':
+      case 'session_time_limit_exceeded': {
+        const detail = JSON.stringify(msg);
+        console.error(`[stt] ElevenLabs error (${msgType}):`, detail);
+        this.emit('error', new Error(`ElevenLabs ${msgType}: ${detail}`));
+        break;
+      }
+
       default:
+        console.log('[stt] unhandled message:', JSON.stringify(msg));
         break;
     }
   }
@@ -146,12 +169,18 @@ export class SttClient extends EventEmitter {
 
   private _sendChunkRaw(buf: Buffer): void {
     if (this.ws?.readyState !== WebSocket.OPEN) return;
-    this.ws.send(JSON.stringify({ audio: buf.toString('base64') }));
+    // Correct ElevenLabs Scribe Realtime wire format
+    this.ws.send(JSON.stringify({
+      message_type: 'input_audio_chunk',
+      audio_base_64: buf.toString('base64'),
+      sample_rate: SAMPLE_RATE,
+      commit: false,
+    }));
   }
 
   commitManual(): void {
     if (this.ws?.readyState !== WebSocket.OPEN) return;
-    this.ws.send(JSON.stringify({ type: 'commit' }));
+    this.ws.send(JSON.stringify({ message_type: 'commit' }));
   }
 
   switchMode(mode: Mode): void {
