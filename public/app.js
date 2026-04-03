@@ -42,7 +42,8 @@ const connectBtn = document.getElementById('btn-connect');
 // ── WebSocket ─────────────────────────────────────────────────────────────
 
 function connectWs() {
-  const url = `ws://${location.host}`;
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const url = `${protocol}//${location.host}`;
   ws = new WebSocket(url);
 
   ws.onopen = () => {
