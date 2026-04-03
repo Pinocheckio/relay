@@ -75,6 +75,25 @@ export function detectSpeaker(languageCode: string): Speaker | null {
   return null;
 }
 
+// Convert text into the target language — used when Scribe mis-transcribed in the wrong language.
+// If the text is already in targetLang, GPT returns it unchanged.
+export async function convertToLanguage(text: string, targetLang: Speaker): Promise<string> {
+  const target = langName(targetLang);
+  const completion = await openai.chat.completions.create({
+    model: 'gpt-5.4-mini',
+    messages: [
+      {
+        role: 'system',
+        content: `Rewrite the following text in ${target}. If it is already in ${target}, return it unchanged. Return only the rewritten text — no explanation.`,
+      },
+      { role: 'user', content: text },
+    ],
+    temperature: 0.1,
+    max_completion_tokens: 500,
+  });
+  return completion.choices[0]?.message?.content?.trim() ?? text;
+}
+
 export async function translate(text: string, from: Speaker, to: Speaker): Promise<string> {
   const systemPrompt =
     `You are a professional interpreter in a social care conversation. ` +

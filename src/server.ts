@@ -6,7 +6,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 import { SttClient } from './stt.js';
-import { translate, detectSpeaker, isNonLatin, normalizeScript } from './translator.js';
+import { translate, detectSpeaker, isNonLatin, normalizeScript, convertToLanguage } from './translator.js';
 import { synthesize } from './tts.js';
 import { createSession, addEntry, updateEntry, makeEntryId, generateReport } from './session.js';
 import type { ClientMessage, Session, Speaker } from './types.js';
@@ -213,12 +213,17 @@ wss.on('connection', (clientWs: WebSocket) => {
       case 'redo_entry': {
         const { entryId, text, sourceLang, targetLang } = msg;
         try {
-          const nativeText = await normalizeScript(text, sourceLang);
+          // Step 1: Convert stored text to the declared source language.
+          // Scribe may have mis-transcribed (e.g. Dutch speech → English text).
+          // convertToLanguage asks GPT to rewrite it in sourceLang if it isn't already.
+          const sourceText = await convertToLanguage(text, sourceLang);
+          console.log(`[redo] converted "${text.slice(0,30)}" → "${sourceText.slice(0,30)}" (${sourceLang})`);
+          const nativeText = await normalizeScript(sourceText, sourceLang);
           const translated = targetLang ? await translate(nativeText, sourceLang, targetLang) : '';
           send({
             type: 'corrected_transcript',
             entryId,
-            text: nativeText,
+            text: nativeText,  // now in the correct source language
             language: sourceLang,
             targetLanguage: targetLang,
             translated,

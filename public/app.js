@@ -183,6 +183,8 @@ function handleServerMessage(msg) {
 
     case 'report':
       showReport(msg.content);
+      generateReportBtn.disabled = false;
+      generateReportBtn.textContent = 'Genereer verslag';
       break;
   }
 }
@@ -595,7 +597,17 @@ selectLang2.addEventListener('change', () => {
 });
 
 generateReportBtn.addEventListener('click', () => {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    setStatus('Maak eerst verbinding om een verslag te genereren.');
+    return;
+  }
   sendWs({ type: 'generate_report' });
+  generateReportBtn.disabled = true;
+  generateReportBtn.textContent = 'Genereren...';
+  setTimeout(() => {
+    generateReportBtn.disabled = false;
+    generateReportBtn.textContent = 'Genereer verslag';
+  }, 15000);
 });
 
 copyReportBtn.addEventListener('click', () => {
