@@ -68,7 +68,7 @@ ${transcript}
       { role: 'user', content: userPrompt },
     ],
     temperature: 0.3,
-    max_tokens: 1500,
+    max_completion_tokens: 1500,
   });
 
   return completion.choices[0]?.message?.content ?? 'Verslag kon niet worden gegenereerd.';
