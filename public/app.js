@@ -101,6 +101,8 @@ function connectWs() {
     setStatus('Verbonden');
     connectBtn.textContent = 'Verbreken';
     connectBtn.classList.add('connected');
+    // Sync current pair selection to server (user may have changed it before connecting)
+    ws.send(JSON.stringify({ type: 'set_pair', pair: currentPair }));
   };
 
   ws.onclose = () => {
