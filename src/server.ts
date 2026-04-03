@@ -65,30 +65,37 @@ wss.on('connection', (clientWs: WebSocket) => {
     console.error('[stt] error', err.message);
     send({ type: 'error', text: `STT fout: ${err.message}` });
   });
-  // Track language from partials — more reliable than committed detection for similar languages
+  // Track partials — language AND text, because Scribe sometimes re-transcribes differently on commit
   let lastPartialLang: Speaker | null = null;
+  let lastPartialText = '';
 
   stt.on('partial', (text: string, language: string) => {
     const partialDetected = detectSpeaker(language);
     if (partialDetected) lastPartialLang = partialDetected;
+    if (text) lastPartialText = text;
     send({ type: 'partial_transcript', text, language });
   });
 
-  stt.on('committed', async (text: string, languageCode: string) => {
+  stt.on('committed', async (committedText: string, languageCode: string) => {
     let detected = detectSpeaker(languageCode);
-    console.log(`[stt] committed lang=${languageCode} → ${detected ?? 'unknown'}, partials said: ${lastPartialLang ?? 'unknown'}`);
+    let text = committedText;
 
-    // Scribe sometimes re-classifies language on commit (e.g. Dutch → English).
-    // Partials are more stable — if they consistently showed a pair language, trust them.
-    if (lastPartialLang && lastPartialLang !== detected) {
+    console.log(`[stt] committed lang=${languageCode}(${detected}) text="${text.slice(0,40)}" | partial lang=${lastPartialLang} text="${lastPartialText.slice(0,40)}"`);
+
+    // Scribe sometimes re-transcribes the audio differently on commit than during streaming.
+    // When committed language disagrees with what the partials showed, trust BOTH the
+    // partial language AND the partial text (the committed text is in the wrong language).
+    if (lastPartialLang && lastPartialLang !== detected && lastPartialText) {
       const partialInPair = lastPartialLang === session.lang1 || lastPartialLang === session.lang2;
-      const committedInPair = detected === session.lang1 || detected === session.lang2;
-      if (partialInPair && (!committedInPair || committedInPair)) {
-        console.log(`[stt] overriding committed lang "${detected}" with partial lang "${lastPartialLang}"`);
+      if (partialInPair) {
+        console.log(`[stt] Scribe re-transcribed on commit: reverting to partial text+lang`);
         detected = lastPartialLang;
+        text = lastPartialText; // use the partial text, not the committed re-transcription
       }
     }
-    lastPartialLang = null; // reset after each commit
+
+    lastPartialLang = null;
+    lastPartialText = '';
 
     // Only process languages that are part of the selected pair
     const sameLanguage = session.lang1 === session.lang2;
