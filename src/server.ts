@@ -65,13 +65,30 @@ wss.on('connection', (clientWs: WebSocket) => {
     console.error('[stt] error', err.message);
     send({ type: 'error', text: `STT fout: ${err.message}` });
   });
+  // Track language from partials — more reliable than committed detection for similar languages
+  let lastPartialLang: Speaker | null = null;
+
   stt.on('partial', (text: string, language: string) => {
+    const partialDetected = detectSpeaker(language);
+    if (partialDetected) lastPartialLang = partialDetected;
     send({ type: 'partial_transcript', text, language });
   });
 
   stt.on('committed', async (text: string, languageCode: string) => {
-    const detected = detectSpeaker(languageCode);
-    console.log(`[stt] committed lang=${languageCode} → ${detected ?? 'unknown'}: ${text}`);
+    let detected = detectSpeaker(languageCode);
+    console.log(`[stt] committed lang=${languageCode} → ${detected ?? 'unknown'}, partials said: ${lastPartialLang ?? 'unknown'}`);
+
+    // Scribe sometimes re-classifies language on commit (e.g. Dutch → English).
+    // Partials are more stable — if they consistently showed a pair language, trust them.
+    if (lastPartialLang && lastPartialLang !== detected) {
+      const partialInPair = lastPartialLang === session.lang1 || lastPartialLang === session.lang2;
+      const committedInPair = detected === session.lang1 || detected === session.lang2;
+      if (partialInPair && (!committedInPair || committedInPair)) {
+        console.log(`[stt] overriding committed lang "${detected}" with partial lang "${lastPartialLang}"`);
+        detected = lastPartialLang;
+      }
+    }
+    lastPartialLang = null; // reset after each commit
 
     // Only process languages that are part of the selected pair
     const sameLanguage = session.lang1 === session.lang2;
