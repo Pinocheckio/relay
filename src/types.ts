@@ -32,6 +32,11 @@ export interface RedoEntryMessage {
   targetLang: Speaker | null;
 }
 
+export interface DeleteEntryMessage {
+  type: 'delete_entry';
+  entryId: string;
+}
+
 export interface GenerateReportMessage {
   type: 'generate_report';
 }
@@ -42,6 +47,7 @@ export type ClientMessage =
   | ModeSwitchMessage
   | SetLanguagesMessage
   | RedoEntryMessage
+  | DeleteEntryMessage
   | GenerateReportMessage;
 
 // ── Messages: Server → Browser ────────────────────────────────────────────

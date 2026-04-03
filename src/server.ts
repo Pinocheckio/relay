@@ -231,6 +231,10 @@ wss.on('connection', (clientWs: WebSocket) => {
         break;
       }
 
+      case 'delete_entry':
+        session.entries = session.entries.filter(e => e.id !== msg.entryId);
+        break;
+
       case 'generate_report': {
         send({ type: 'status', text: 'Verslag genereren...' });
         try {

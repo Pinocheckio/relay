@@ -463,6 +463,8 @@ html, body {
 
 .correction-lang-btn:hover { background: #4b5563; }
 .correction-lang-btn.current { background: var(--accent); border-color: var(--accent); }
+.correction-delete { background: #7f1d1d; border-color: #991b1b; font-weight: 700; font-size: 1rem; line-height: 1; }
+.correction-delete:hover { background: #991b1b; }
 
 /* Flash animation when a bubble is updated */
 .transcript-entry.updated .bubble {

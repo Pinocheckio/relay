@@ -262,13 +262,25 @@ function showCorrectionPopover(entryEl, anchorEl) {
   const currentLang = entryEl.dataset.sourceLang;
 
   correctionLangBtns.innerHTML = '';
-  AVAILABLE_LANGS.forEach(({ code, label }) => {
+
+  // Only show the 2 languages in the active pair
+  const pairLangs = [currentLang1, currentLang2].filter((v, i, a) => a.indexOf(v) === i);
+  pairLangs.forEach(code => {
+    const label = LANG_LABELS[code] ?? code.toUpperCase();
     const btn = document.createElement('button');
     btn.className = 'correction-lang-btn' + (code === currentLang ? ' current' : '');
     btn.textContent = label;
-    btn.addEventListener('click', () => applyCorrection(entryEl, code));
+    btn.addEventListener('click', (e) => { e.stopPropagation(); applyCorrection(entryEl, code); });
     correctionLangBtns.appendChild(btn);
   });
+
+  // Delete button
+  const delBtn = document.createElement('button');
+  delBtn.className = 'correction-lang-btn correction-delete';
+  delBtn.textContent = '×';
+  delBtn.title = 'Verwijder bericht';
+  delBtn.addEventListener('click', (e) => { e.stopPropagation(); deleteEntry(entryEl); });
+  correctionLangBtns.appendChild(delBtn);
 
   // Position popover near the label
   const rect = anchorEl.getBoundingClientRect();
@@ -282,19 +294,28 @@ function applyCorrection(entryEl, newSourceLang) {
   const entryId = entryEl.dataset.entryId;
   const text = entryEl.dataset.text;
 
-  // Determine target: the other language in the pair
-  let targetLang = null;
-  if (newSourceLang === currentLang1) targetLang = currentLang2;
-  else if (newSourceLang === currentLang2) targetLang = currentLang1;
-  else targetLang = newSourceLang === currentLang1 ? currentLang2 : currentLang1;
+  // Target is always the OTHER language in the pair
+  const targetLang = currentLang1 === currentLang2
+    ? null
+    : newSourceLang === currentLang1 ? currentLang2 : currentLang1;
 
-  if (currentLang1 === currentLang2) targetLang = null;
-
-  // Show loading state on the bubble label
+  // Show loading state
   const label = entryEl.querySelector('.bubble-label');
-  if (label) label.textContent = '...';
+  if (label) label.textContent = '⏳';
 
   sendWs({ type: 'redo_entry', entryId, text, sourceLang: newSourceLang, targetLang });
+}
+
+function deleteEntry(entryEl) {
+  correctionPopover.classList.add('hidden');
+  const entryId = entryEl.dataset.entryId;
+  sendWs({ type: 'delete_entry', entryId });
+  entryEl.style.transition = 'opacity 0.2s';
+  entryEl.style.opacity = '0';
+  setTimeout(() => {
+    entryEl.remove();
+    entryElements.delete(entryId);
+  }, 200);
 }
 
 // Close popover on outside click
