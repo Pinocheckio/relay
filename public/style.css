@@ -466,6 +466,29 @@ html, body {
 .ptt-lang { font-size: 1rem; font-weight: 700; }
 .ptt-hint { font-size: 0.75rem; opacity: 0.8; }
 
+/* ── Commit button ───────────────────────────────────────────────────── */
+
+.commit-controls { display: flex; }
+.commit-controls.hidden { display: none; }
+
+.btn-commit {
+  flex: 1;
+  padding: 0.9rem 1rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  background: #22c55e;
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+  box-shadow: var(--shadow);
+}
+
+.btn-commit:hover { background: #16a34a; }
+.btn-commit:active { transform: scale(0.98); }
+.btn-commit:disabled { background: #9ca3af; cursor: default; }
+
 /* ── Report trigger ──────────────────────────────────────────────────── */
 
 .report-trigger {

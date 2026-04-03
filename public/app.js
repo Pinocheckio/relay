@@ -79,6 +79,8 @@ const modeManuBtn = document.getElementById('btn-mode-manual');
 const pttNlBtn = document.getElementById('btn-ptt-nl');
 const pttFaBtn = document.getElementById('btn-ptt-fa');
 const pttControls = document.getElementById('ptt-controls');
+const commitBtn = document.getElementById('btn-commit');
+const commitControls = document.getElementById('commit-controls');
 const generateReportBtn = document.getElementById('btn-generate-report');
 const reportPanel = document.getElementById('report-panel');
 const reportContent = document.getElementById('report-content');
@@ -299,7 +301,8 @@ function setMode(mode) {
   modeAutoBtn.classList.toggle('active', mode === 'auto');
   modeManuBtn.classList.toggle('active', mode === 'manual');
   pttControls.classList.toggle('hidden', mode === 'auto');
-  setStatus(mode === 'auto' ? 'Luisteren...' : 'Klaar — houd knop ingedrukt.');
+  commitControls.classList.toggle('hidden', mode === 'manual');
+  setStatus(mode === 'auto' ? 'Spreek, dan druk op Klaar.' : 'Klaar — houd knop ingedrukt.');
   sendWs({ type: 'mode_switch', mode });
 }
 
@@ -407,6 +410,17 @@ document.querySelectorAll('.pair-toggle .btn-mode').forEach(btn => {
 ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(evt => {
   pttNlBtn.addEventListener(evt, () => pttEnd('nl'));
   pttFaBtn.addEventListener(evt, () => pttEnd('fa'));
+});
+
+commitBtn.addEventListener('click', () => {
+  sendWs({ type: 'manual_commit' });
+  partialEl.textContent = '';
+  commitBtn.disabled = true;
+  commitBtn.textContent = 'Verwerken...';
+  setTimeout(() => {
+    commitBtn.disabled = false;
+    commitBtn.textContent = 'Klaar — vertaal nu';
+  }, 3000);
 });
 
 generateReportBtn.addEventListener('click', () => {
