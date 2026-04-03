@@ -7,10 +7,49 @@ const LANG_NAMES: Record<string, string> = {
   nl: 'Dutch',
   fa: 'Farsi (Persian)',
   en: 'English',
+  ar: 'Arabic',
+  tr: 'Turkish',
+  de: 'German',
+  fr: 'French',
 };
 
 function langName(code: Speaker): string {
   return LANG_NAMES[code] ?? code.toUpperCase();
+}
+
+// Languages that use non-Latin scripts — Scribe sometimes romanizes these
+const NON_LATIN = new Set(['fa', 'ar', 'zh', 'ja', 'ko', 'hi', 'he', 'th', 'ru', 'uk', 'bg']);
+
+export function isNonLatin(lang: Speaker): boolean {
+  return NON_LATIN.has(lang);
+}
+
+// Check if text is entirely in ASCII/Latin (no native script present)
+function isLatinOnly(text: string): boolean {
+  return /^[\x00-\x7F\u00C0-\u024F\s.,!?'"()\-:;]+$/.test(text);
+}
+
+// Convert romanized/transliterated text to the proper native script via GPT.
+// Only runs when text is Latin-only but the language uses a non-Latin script.
+export async function normalizeScript(text: string, lang: Speaker): Promise<string> {
+  if (!isNonLatin(lang) || !isLatinOnly(text)) return text;
+
+  const completion = await openai.chat.completions.create({
+    model: 'gpt-5.4-mini',
+    messages: [
+      {
+        role: 'system',
+        content: `You are a script converter. The input is spoken ${langName(lang)} that was ` +
+          `transcribed in romanized/Latin form. Convert it to the correct native script ` +
+          `(${langName(lang)}). Return only the converted text — no explanation, no quotes.`,
+      },
+      { role: 'user', content: text },
+    ],
+    temperature: 0,
+    max_completion_tokens: 300,
+  });
+
+  return completion.choices[0]?.message?.content?.trim() ?? text;
 }
 
 // Known language code prefixes → canonical Speaker code

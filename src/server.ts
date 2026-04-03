@@ -6,7 +6,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 import { SttClient } from './stt.js';
-import { translate, detectSpeaker } from './translator.js';
+import { translate, detectSpeaker, isNonLatin, normalizeScript } from './translator.js';
 import { synthesize } from './tts.js';
 import { createSession, addEntry, generateReport } from './session.js';
 import type { ClientMessage, Session, Speaker } from './types.js';
@@ -79,7 +79,6 @@ wss.on('connection', (clientWs: WebSocket) => {
     let targetSpeaker: Speaker | null = null;
 
     if (sameLanguage) {
-      // Same-language mode: use lang1 regardless of detection
       detectedSpeaker = session.lang1;
     } else if (detected === session.lang1) {
       detectedSpeaker = session.lang1;
@@ -88,25 +87,43 @@ wss.on('connection', (clientWs: WebSocket) => {
       detectedSpeaker = session.lang2;
       targetSpeaker = session.lang1;
     } else {
-      // Detected language not in pair — skip silently (don't guess)
-      console.log(`[stt] lang "${languageCode}" not in pair ${session.lang1}-${session.lang2}, skipping`);
-      return;
+      // Scribe misidentified the language.
+      // If one side of the pair is non-Latin (FA, AR, etc.) and the other side is Latin,
+      // Latin languages are reliably detected — so if it's not the Latin side, it's the non-Latin side.
+      const lang1NonLatin = isNonLatin(session.lang1);
+      const lang2NonLatin = isNonLatin(session.lang2);
+      if (lang2NonLatin && !lang1NonLatin) {
+        console.log(`[stt] lang "${languageCode}" → assuming ${session.lang2} (non-Latin fallback)`);
+        detectedSpeaker = session.lang2;
+        targetSpeaker = session.lang1;
+      } else if (lang1NonLatin && !lang2NonLatin) {
+        console.log(`[stt] lang "${languageCode}" → assuming ${session.lang1} (non-Latin fallback)`);
+        detectedSpeaker = session.lang1;
+        targetSpeaker = session.lang2;
+      } else {
+        console.log(`[stt] lang "${languageCode}" not in pair ${session.lang1}-${session.lang2}, skipping`);
+        return;
+      }
     }
 
     try {
-      const translated = targetSpeaker ? await translate(text, detectedSpeaker, targetSpeaker) : '';
+      // If the speaker uses a non-Latin script but Scribe returned romanized text, convert first
+      const nativeText = await normalizeScript(text, detectedSpeaker);
+      if (nativeText !== text) console.log(`[script] normalized "${text}" → "${nativeText}"`);
+
+      const translated = targetSpeaker ? await translate(nativeText, detectedSpeaker, targetSpeaker) : '';
       if (targetSpeaker) console.log(`[translate] [${detectedSpeaker}->${targetSpeaker}]: ${translated}`);
 
       send({
         type: 'committed_transcript',
-        text,
+        text: nativeText,
         language: detectedSpeaker,
         targetLanguage: targetSpeaker,
         translated,
         timestamp: new Date().toISOString(),
       });
 
-      addEntry(session, { speaker: detectedSpeaker, original: text, translated, timestamp: new Date() });
+      addEntry(session, { speaker: detectedSpeaker, original: nativeText, translated, timestamp: new Date() });
 
       if (targetSpeaker && translated) {
         const voiceId = VOICES[targetSpeaker] ?? VOICE_NL;
