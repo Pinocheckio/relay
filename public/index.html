@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Relay — Gesprek naar Verslag</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+
+  <!-- ── Header ───────────────────────────────────────────────────────── -->
+  <header class="header">
+    <div class="header-left">
+      <span class="logo">Relay</span>
+      <span class="header-subtitle">Gesprek naar Verslag</span>
+    </div>
+    <div class="header-right">
+      <div id="tts-indicator" class="tts-indicator" title="Vertaling wordt ingesproken...">
+        <span class="tts-dot"></span>
+        <span class="tts-label">Vertaling</span>
+      </div>
+      <div class="mode-toggle">
+        <button id="btn-mode-auto" class="btn-mode active">Auto</button>
+        <button id="btn-mode-manual" class="btn-mode">Handmatig</button>
+      </div>
+      <button id="btn-connect" class="btn-connect">Verbinden</button>
+    </div>
+  </header>
+
+  <!-- ── Main content ──────────────────────────────────────────────────── -->
+  <main class="main">
+
+    <!-- Transcript area -->
+    <section class="transcript-section">
+      <div id="transcript" class="transcript">
+        <p class="transcript-placeholder">
+          Klik op <strong>Verbinden</strong> om het gesprek te starten.
+          Relay vertaalt automatisch tussen Nederlands en Farsi.
+        </p>
+      </div>
+
+      <!-- Partial transcript / typing indicator -->
+      <div class="partial-bar">
+        <span class="partial-icon">...</span>
+        <span id="partial-text" class="partial-text"></span>
+      </div>
+    </section>
+
+    <!-- Status bar -->
+    <div class="status-bar">
+      <span id="status-text" class="status-text">Niet verbonden</span>
+      <span class="status-sep">|</span>
+      <span class="lang-label">Taal:</span>
+      <span id="lang-detected" class="lang-detected">—</span>
+    </div>
+
+    <!-- PTT buttons (manual mode only) -->
+    <div id="ptt-controls" class="ptt-controls hidden">
+      <button id="btn-ptt-nl" class="btn-ptt btn-ptt-nl">
+        <span class="ptt-icon">🎙️</span>
+        <span class="ptt-lang">NL</span>
+        <span class="ptt-hint">Houd ingedrukt</span>
+      </button>
+      <button id="btn-ptt-fa" class="btn-ptt btn-ptt-fa">
+        <span class="ptt-icon">🎙️</span>
+        <span class="ptt-lang">FA</span>
+        <span class="ptt-hint">Hold to speak</span>
+      </button>
+    </div>
+
+    <!-- Report button -->
+    <div class="report-trigger">
+      <button id="btn-generate-report" class="btn-report">
+        Genereer verslag
+      </button>
+    </div>
+
+    <!-- Report panel -->
+    <section id="report-panel" class="report-panel hidden">
+      <div class="report-header">
+        <h2>Zorgverslag</h2>
+        <button id="btn-copy-report" class="btn-copy">Kopieer</button>
+      </div>
+      <div id="report-content" class="report-content"></div>
+    </section>
+
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
