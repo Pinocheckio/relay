@@ -29,7 +29,7 @@ export async function translate(text: string, speaker: Speaker): Promise<string>
   const systemPrompt = buildSystemPrompt(speaker, target);
 
   const completion = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: 'gpt-5.4-mini',
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: text },

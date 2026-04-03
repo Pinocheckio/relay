@@ -62,7 +62,7 @@ ${transcript}
 --- EINDE TRANSCRIPT ---`;
 
   const completion = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: 'gpt-5.4',
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
