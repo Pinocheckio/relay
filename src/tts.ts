@@ -25,6 +25,12 @@ export async function synthesize(
 ): Promise<void> {
   const url = `${ELEVENLABS_BASE}/text-to-speech/${voiceId}/stream`;
 
+  const modelId = MODEL_BY_LANG[targetSpeaker] ?? 'eleven_multilingual_v2';
+  // eleven_multilingual_v2 auto-detects language from text — don't pass language_code
+  const langCodeField = modelId !== 'eleven_multilingual_v2'
+    ? { language_code: LANGUAGE_CODES[targetSpeaker] }
+    : {};
+
   const response = await fetch(url, {
     method: 'POST',
     headers: {
@@ -33,8 +39,8 @@ export async function synthesize(
     },
     body: JSON.stringify({
       text,
-      model_id: MODEL_BY_LANG[targetSpeaker] ?? 'eleven_multilingual_v2',
-      language_code: LANGUAGE_CODES[targetSpeaker],
+      model_id: modelId,
+      ...langCodeField,
       output_format: 'mp3_44100_128',
       voice_settings: {
         stability: 0.5,
