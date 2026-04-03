@@ -84,6 +84,10 @@ const reportContent = document.getElementById('report-content');
 const copyReportBtn = document.getElementById('btn-copy-report');
 const ttsIndicator = document.getElementById('tts-indicator');
 const connectBtn = document.getElementById('btn-connect');
+const levelFill = document.getElementById('level-fill');
+const levelStatus = document.getElementById('level-status');
+
+let chunksSent = 0;
 
 // ── WebSocket ─────────────────────────────────────────────────────────────
 
@@ -188,6 +192,10 @@ async function startRecording() {
   workletNode = new AudioWorkletNode(audioContext, 'pcm-processor');
 
   workletNode.port.onmessage = (e) => {
+    if (e.data.type === 'level') {
+      updateLevel(e.data.rms);
+      return;
+    }
     if (e.data.type !== 'pcm_chunk') return;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
@@ -198,6 +206,8 @@ async function startRecording() {
     const int16 = float32ToInt16(float32);
     const base64 = arrayBufferToBase64(int16.buffer);
 
+    chunksSent++;
+    levelStatus.textContent = `${chunksSent} chunks`;
     sendWs({ type: 'audio_chunk', data: base64, mode: currentMode });
   };
 
@@ -215,6 +225,16 @@ function stopRecording() {
   if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
   if (audioContext) { audioContext.close(); audioContext = null; }
   isRecording = false;
+}
+
+// ── Audio level meter ─────────────────────────────────────────────────────
+
+function updateLevel(rms) {
+  // rms is 0.0–1.0 (float32 PCM), scale to percentage with some headroom
+  const pct = Math.min(100, rms * 400);
+  levelFill.style.width = pct + '%';
+  levelFill.classList.toggle('loud', pct > 60);
+  levelFill.classList.toggle('clipping', pct > 90);
 }
 
 // ── PCM helpers ───────────────────────────────────────────────────────────
@@ -352,7 +372,16 @@ function showReport(markdown) {
 // ── Event listeners ───────────────────────────────────────────────────────
 
 connectBtn.addEventListener('click', () => {
-  if (ws) { disconnectWs(); } else { connectWs(); startRecording(); }
+  if (ws) {
+    disconnectWs();
+    levelFill.style.width = '0%';
+    levelStatus.textContent = '—';
+    chunksSent = 0;
+  } else {
+    chunksSent = 0;
+    connectWs();
+    startRecording();
+  }
 });
 
 modeAutoBtn.addEventListener('click', () => setMode('auto'));
