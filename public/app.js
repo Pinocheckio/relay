@@ -88,7 +88,7 @@ const connectBtn = document.getElementById('btn-connect');
 const levelFill = document.getElementById('level-fill');
 const levelStatus = document.getElementById('level-status');
 
-let chunksSent = 0;
+let lastLevelUpdate = 0;
 
 // ── WebSocket ─────────────────────────────────────────────────────────────
 
@@ -154,7 +154,8 @@ function handleServerMessage(msg) {
 
     case 'committed_transcript':
       partialEl.textContent = '';
-      appendTranscript(msg.language, msg.text, msg.translated);
+      setLang(msg.language);
+      appendTranscript(msg.language, msg.targetLanguage, msg.text, msg.translated);
       break;
 
     case 'tts_audio':
@@ -209,8 +210,6 @@ async function startRecording() {
     const int16 = float32ToInt16(float32);
     const base64 = arrayBufferToBase64(int16.buffer);
 
-    chunksSent++;
-    levelStatus.textContent = `${chunksSent} chunks`;
     sendWs({ type: 'audio_chunk', data: base64, mode: currentMode });
   };
 
@@ -243,11 +242,16 @@ let vadSpeechStart = 0;
 let vadSilenceTimer = null;
 
 function updateLevel(rms) {
+  // Throttle DOM updates to 20fps to stop the bar from glitching
+  const now = Date.now();
+  if (now - lastLevelUpdate < 50) return;
+  lastLevelUpdate = now;
+
   const pct = Math.min(100, rms * 2000);
   levelFill.style.width = pct + '%';
   levelFill.classList.toggle('loud', pct > 60);
   levelFill.classList.toggle('clipping', pct > 90);
-  levelStatus.textContent = vadSpeaking ? '🗣 spreekt' : '—';
+  levelStatus.textContent = vadSpeaking ? '● spreekt' : '';
 
   // Only run VAD in auto mode when connected
   if (currentMode !== 'auto' || !ws || ws.readyState !== WebSocket.OPEN) return;
@@ -370,26 +374,35 @@ function setStatus(text) {
   statusEl.textContent = text;
 }
 
+const LANG_LABELS = { nl: 'NL', 'nl-NL': 'NL', 'nl-BE': 'NL', fa: 'FA', 'fa-IR': 'FA', en: 'EN', 'en-US': 'EN', 'en-GB': 'EN' };
 function setLang(code) {
-  const map = { nl: 'NL', 'nl-NL': 'NL', 'nl-BE': 'NL', fa: 'FA', 'fa-IR': 'FA' };
-  langEl.textContent = map[code] ?? code.toUpperCase();
+  if (code) langEl.textContent = LANG_LABELS[code] ?? code.slice(0,2).toUpperCase();
 }
 
-function appendTranscript(language, original, translated) {
+function appendTranscript(sourceLang, targetLang, original, translated) {
   const entry = document.createElement('div');
-  entry.className = `transcript-entry speaker-${language}`;
+  entry.className = `transcript-entry speaker-${sourceLang}`;
+
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
 
   const originalLine = document.createElement('p');
-  originalLine.className = 'original';
-  originalLine.dir = language === 'fa' ? 'rtl' : 'ltr';
-  originalLine.textContent = `${language.toUpperCase()}: ${original}`;
+  originalLine.className = 'bubble-text';
+  originalLine.dir = sourceLang === 'fa' ? 'rtl' : 'ltr';
+  originalLine.textContent = original;
+
+  const label = document.createElement('span');
+  label.className = 'bubble-label';
+  label.textContent = LANG_LABELS[sourceLang] ?? sourceLang.toUpperCase();
 
   const translatedLine = document.createElement('p');
-  translatedLine.className = 'translated';
-  translatedLine.dir = language === 'nl' ? 'rtl' : 'ltr'; // translated is the other language
-  translatedLine.textContent = `→ ${language === 'nl' ? 'FA' : 'NL'}: ${translated}`;
+  translatedLine.className = 'translation';
+  translatedLine.dir = targetLang === 'fa' ? 'rtl' : 'ltr';
+  translatedLine.textContent = `${LANG_LABELS[targetLang] ?? targetLang.toUpperCase()}: ${translated}`;
 
-  entry.appendChild(originalLine);
+  bubble.appendChild(label);
+  bubble.appendChild(originalLine);
+  entry.appendChild(bubble);
   entry.appendChild(translatedLine);
   transcriptEl.appendChild(entry);
   transcriptEl.scrollTop = transcriptEl.scrollHeight;
@@ -419,10 +432,8 @@ connectBtn.addEventListener('click', () => {
   if (ws) {
     disconnectWs();
     levelFill.style.width = '0%';
-    levelStatus.textContent = '—';
-    chunksSent = 0;
+    levelStatus.textContent = '';
   } else {
-    chunksSent = 0;
     connectWs();
     startRecording();
   }

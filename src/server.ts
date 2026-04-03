@@ -111,6 +111,7 @@ wss.on('connection', (clientWs: WebSocket) => {
         type: 'committed_transcript',
         text,
         language: speaker,
+        targetLanguage: targetSpeaker,
         translated,
         timestamp: new Date().toISOString(),
       });

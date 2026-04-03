@@ -47,6 +47,7 @@ export interface CommittedTranscriptMessage {
   type: 'committed_transcript';
   text: string;
   language: Speaker;
+  targetLanguage: Speaker;
   translated: string;
   timestamp: string;
 }
