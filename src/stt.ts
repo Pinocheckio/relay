@@ -178,7 +178,12 @@ export class SttClient extends EventEmitter {
 
   commitManual(): void {
     if (this.ws?.readyState !== WebSocket.OPEN) return;
-    this.ws.send(JSON.stringify({ message_type: 'commit' }));
+    this.ws.send(JSON.stringify({
+      message_type: 'input_audio_chunk',
+      audio_base_64: '',
+      sample_rate: SAMPLE_RATE,
+      commit: true,
+    }));
   }
 
   switchMode(mode: Mode): void {
