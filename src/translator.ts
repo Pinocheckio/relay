@@ -13,15 +13,27 @@ function langName(code: Speaker): string {
   return LANG_NAMES[code] ?? code.toUpperCase();
 }
 
-// Map ElevenLabs BCP-47 codes to our Speaker codes
+// Known language code prefixes → canonical Speaker code
+const LANG_PREFIXES: Array<[string, Speaker]> = [
+  ['nl', 'nl'],
+  ['en', 'en'],
+  ['fa', 'fa'],
+  ['per', 'fa'], // ISO 639-2
+  ['fr', 'fr'],
+  ['de', 'de'],
+  ['ar', 'ar'],
+  ['tr', 'tr'],
+  ['es', 'es'],
+];
+
+// Map ElevenLabs BCP-47 codes to canonical Speaker codes.
+// Returns null for anything unrecognised — caller decides what to do.
 export function detectSpeaker(languageCode: string): Speaker | null {
-  const code = languageCode.toLowerCase();
-  if (code.startsWith('nl')) return 'nl';
-  if (code.startsWith('fa') || code.startsWith('per')) return 'fa';
-  if (code.startsWith('en')) return 'en';
-  // Return the raw 2-letter code for other languages
-  const base = code.slice(0, 2);
-  return base || null;
+  const code = languageCode.toLowerCase().replace('_', '-');
+  for (const [prefix, speaker] of LANG_PREFIXES) {
+    if (code === prefix || code.startsWith(prefix + '-')) return speaker;
+  }
+  return null;
 }
 
 export async function translate(text: string, from: Speaker, to: Speaker): Promise<string> {

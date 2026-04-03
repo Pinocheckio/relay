@@ -70,29 +70,27 @@ wss.on('connection', (clientWs: WebSocket) => {
   });
 
   stt.on('committed', async (text: string, languageCode: string) => {
-    const speaker = detectSpeaker(languageCode);
-    if (!speaker) { console.log(`[stt] unknown language ${languageCode}, skipping`); return; }
+    const detected = detectSpeaker(languageCode);
+    console.log(`[stt] committed lang=${languageCode} → ${detected ?? 'unknown'}: ${text}`);
 
-    console.log(`[stt] committed [${speaker}]: ${text}`);
-
-    // Determine target language
+    // Only process languages that are part of the selected pair
     const sameLanguage = session.lang1 === session.lang2;
-    let detectedSpeaker = speaker;
+    let detectedSpeaker: Speaker;
     let targetSpeaker: Speaker | null = null;
 
-    if (!sameLanguage) {
-      if (speaker === session.lang1) {
-        targetSpeaker = session.lang2;
-      } else if (speaker === session.lang2) {
-        targetSpeaker = session.lang1;
-      } else {
-        // Scribe misdetected the language (e.g. Farsi detected as Italian).
-        // Heuristic: lang1 is typically a well-known language (NL/EN) that Scribe
-        // detects reliably. If it's not lang1, treat it as lang2.
-        console.log(`[stt] lang "${speaker}" not in pair, falling back to lang2 (${session.lang2})`);
-        detectedSpeaker = session.lang2;
-        targetSpeaker = session.lang1;
-      }
+    if (sameLanguage) {
+      // Same-language mode: use lang1 regardless of detection
+      detectedSpeaker = session.lang1;
+    } else if (detected === session.lang1) {
+      detectedSpeaker = session.lang1;
+      targetSpeaker = session.lang2;
+    } else if (detected === session.lang2) {
+      detectedSpeaker = session.lang2;
+      targetSpeaker = session.lang1;
+    } else {
+      // Detected language not in pair — skip silently (don't guess)
+      console.log(`[stt] lang "${languageCode}" not in pair ${session.lang1}-${session.lang2}, skipping`);
+      return;
     }
 
     try {
