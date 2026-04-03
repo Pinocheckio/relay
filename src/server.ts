@@ -15,7 +15,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY ?? '';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? '';
-const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID ?? 'JBFqnCBsd6RMkjVDRZzb';
+// Distinct voices per output language for demo clarity
+const VOICE_NL = process.env.ELEVENLABS_VOICE_NL ?? 'nPczCjzI2devNBz1zQrb'; // Brian — Dutch output
+const VOICE_FA = process.env.ELEVENLABS_VOICE_FA ?? '9BWtsMINqrJLrRacOk9x'; // Aria — Farsi output
 const PORT = Number(process.env.PORT ?? 3000);
 
 if (!ELEVENLABS_API_KEY) throw new Error('ELEVENLABS_API_KEY is not set');
@@ -96,9 +98,10 @@ wss.on('connection', (clientWs: WebSocket) => {
         timestamp: new Date(),
       });
 
-      // TTS: stream audio back to browser
+      // TTS: stream audio back to browser (use voice matching the target language)
+      const voiceId = targetSpeaker === 'nl' ? VOICE_NL : VOICE_FA;
       ttsPlaying = true;
-      await synthesize(translated, targetSpeaker, ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID, (chunk) => {
+      await synthesize(translated, targetSpeaker, ELEVENLABS_API_KEY, voiceId, (chunk) => {
         send({ type: 'tts_audio', data: chunk });
       });
       ttsPlaying = false;
