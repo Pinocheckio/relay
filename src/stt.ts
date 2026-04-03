@@ -58,11 +58,9 @@ export class SttClient extends EventEmitter {
       model_id: 'scribe_v2_realtime',
       token,
       audio_format: `pcm_${SAMPLE_RATE}`,
-      commit_strategy: this.mode === 'auto' ? 'vad' : 'manual',
+      commit_strategy: 'manual',
       include_language_detection: 'true',
       include_timestamps: 'true',
-      vad_silence_threshold_secs: '1.0',
-      vad_threshold: '0.3',
     });
 
     const url = `${SCRIBE_URL}?${params.toString()}`;

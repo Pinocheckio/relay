@@ -79,8 +79,6 @@ const modeManuBtn = document.getElementById('btn-mode-manual');
 const pttNlBtn = document.getElementById('btn-ptt-nl');
 const pttFaBtn = document.getElementById('btn-ptt-fa');
 const pttControls = document.getElementById('ptt-controls');
-const commitBtn = document.getElementById('btn-commit');
-const commitControls = document.getElementById('commit-controls');
 const generateReportBtn = document.getElementById('btn-generate-report');
 const reportPanel = document.getElementById('report-panel');
 const reportContent = document.getElementById('report-content');
@@ -223,6 +221,8 @@ async function startRecording() {
 
 function stopRecording() {
   if (!isRecording) return;
+  if (vadSilenceTimer) { clearTimeout(vadSilenceTimer); vadSilenceTimer = null; }
+  vadSpeaking = false;
   if (workletNode) { workletNode.disconnect(); workletNode = null; }
   if (sourceNode) { sourceNode.disconnect(); sourceNode = null; }
   if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
@@ -230,14 +230,52 @@ function stopRecording() {
   isRecording = false;
 }
 
-// ── Audio level meter ─────────────────────────────────────────────────────
+// ── Audio level meter + client-side VAD ──────────────────────────────────
+
+const SPEECH_THRESHOLD = 0.008;  // RMS above this = speech detected
+const SILENCE_MS = 900;          // ms of silence after speech before committing
+const MIN_SPEECH_MS = 250;       // ignore bursts shorter than this (avoid false triggers)
+
+let vadSpeaking = false;
+let vadSpeechStart = 0;
+let vadSilenceTimer = null;
 
 function updateLevel(rms) {
-  // rms is 0.0–1.0 (float32 PCM), scale to percentage with some headroom
   const pct = Math.min(100, rms * 400);
   levelFill.style.width = pct + '%';
   levelFill.classList.toggle('loud', pct > 60);
   levelFill.classList.toggle('clipping', pct > 90);
+
+  // Only run VAD in auto mode when connected
+  if (currentMode !== 'auto' || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+  if (rms > SPEECH_THRESHOLD) {
+    // Speech detected
+    if (!vadSpeaking) {
+      vadSpeaking = true;
+      vadSpeechStart = Date.now();
+    }
+    // Cancel any pending silence commit
+    if (vadSilenceTimer) {
+      clearTimeout(vadSilenceTimer);
+      vadSilenceTimer = null;
+    }
+  } else {
+    // Silence
+    if (vadSpeaking && !vadSilenceTimer) {
+      vadSilenceTimer = setTimeout(() => {
+        vadSilenceTimer = null;
+        if (vadSpeaking) {
+          const speechDuration = Date.now() - vadSpeechStart;
+          vadSpeaking = false;
+          if (speechDuration >= MIN_SPEECH_MS) {
+            // Enough speech captured — commit
+            sendWs({ type: 'manual_commit' });
+          }
+        }
+      }, SILENCE_MS);
+    }
+  }
 }
 
 // ── PCM helpers ───────────────────────────────────────────────────────────
@@ -301,8 +339,7 @@ function setMode(mode) {
   modeAutoBtn.classList.toggle('active', mode === 'auto');
   modeManuBtn.classList.toggle('active', mode === 'manual');
   pttControls.classList.toggle('hidden', mode === 'auto');
-  commitControls.classList.toggle('hidden', mode === 'manual');
-  setStatus(mode === 'auto' ? 'Spreek, dan druk op Klaar.' : 'Klaar — houd knop ingedrukt.');
+  setStatus(mode === 'auto' ? 'Luisteren...' : 'Klaar — houd knop ingedrukt.');
   sendWs({ type: 'mode_switch', mode });
 }
 
@@ -410,17 +447,6 @@ document.querySelectorAll('.pair-toggle .btn-mode').forEach(btn => {
 ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(evt => {
   pttNlBtn.addEventListener(evt, () => pttEnd('nl'));
   pttFaBtn.addEventListener(evt, () => pttEnd('fa'));
-});
-
-commitBtn.addEventListener('click', () => {
-  sendWs({ type: 'manual_commit' });
-  partialEl.textContent = '';
-  commitBtn.disabled = true;
-  commitBtn.textContent = 'Verwerken...';
-  setTimeout(() => {
-    commitBtn.disabled = false;
-    commitBtn.textContent = 'Klaar — vertaal nu';
-  }, 3000);
 });
 
 generateReportBtn.addEventListener('click', () => {
