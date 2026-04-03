@@ -83,6 +83,11 @@ const pttALabel = document.getElementById('ptt-a-label');
 const pttBLabel = document.getElementById('ptt-b-label');
 const pttControls = document.getElementById('ptt-controls');
 const generateReportBtn = document.getElementById('btn-generate-report');
+const correctionPopover = document.getElementById('correction-popover');
+const correctionLangBtns = document.getElementById('correction-lang-btns');
+
+// Map of entryId → DOM element for in-place updates
+const entryElements = new Map();
 const reportPanel = document.getElementById('report-panel');
 const reportContent = document.getElementById('report-content');
 const copyReportBtn = document.getElementById('btn-copy-report');
@@ -160,7 +165,11 @@ function handleServerMessage(msg) {
     case 'committed_transcript':
       partialEl.textContent = '';
       setLang(msg.language);
-      appendTranscript(msg.language, msg.targetLanguage, msg.text, msg.translated);
+      appendTranscript(msg.entryId, msg.language, msg.targetLanguage, msg.text, msg.translated);
+      break;
+
+    case 'corrected_transcript':
+      updateTranscript(msg.entryId, msg.language, msg.targetLanguage, msg.text, msg.translated);
       break;
 
 
@@ -236,6 +245,63 @@ function stopRecording() {
   if (audioContext) { audioContext.close(); audioContext = null; }
   isRecording = false;
 }
+
+// ── Correction popover ────────────────────────────────────────────────────
+
+const AVAILABLE_LANGS = [
+  { code: 'nl', label: 'NL' },
+  { code: 'en', label: 'EN' },
+  { code: 'fa', label: 'FA' },
+  { code: 'ar', label: 'AR' },
+];
+
+let activeEntryEl = null;
+
+function showCorrectionPopover(entryEl, anchorEl) {
+  activeEntryEl = entryEl;
+  const currentLang = entryEl.dataset.sourceLang;
+
+  correctionLangBtns.innerHTML = '';
+  AVAILABLE_LANGS.forEach(({ code, label }) => {
+    const btn = document.createElement('button');
+    btn.className = 'correction-lang-btn' + (code === currentLang ? ' current' : '');
+    btn.textContent = label;
+    btn.addEventListener('click', () => applyCorrection(entryEl, code));
+    correctionLangBtns.appendChild(btn);
+  });
+
+  // Position popover near the label
+  const rect = anchorEl.getBoundingClientRect();
+  correctionPopover.style.top = (rect.bottom + window.scrollY + 4) + 'px';
+  correctionPopover.style.left = rect.left + 'px';
+  correctionPopover.classList.remove('hidden');
+}
+
+function applyCorrection(entryEl, newSourceLang) {
+  correctionPopover.classList.add('hidden');
+  const entryId = entryEl.dataset.entryId;
+  const text = entryEl.dataset.text;
+
+  // Determine target: the other language in the pair
+  let targetLang = null;
+  if (newSourceLang === currentLang1) targetLang = currentLang2;
+  else if (newSourceLang === currentLang2) targetLang = currentLang1;
+  else targetLang = newSourceLang === currentLang1 ? currentLang2 : currentLang1;
+
+  if (currentLang1 === currentLang2) targetLang = null;
+
+  // Show loading state on the bubble label
+  const label = entryEl.querySelector('.bubble-label');
+  if (label) label.textContent = '...';
+
+  sendWs({ type: 'redo_entry', entryId, text, sourceLang: newSourceLang, targetLang });
+}
+
+// Close popover on outside click
+document.addEventListener('click', () => {
+  correctionPopover.classList.add('hidden');
+  activeEntryEl = null;
+});
 
 // ── Audio level meter + client-side VAD ──────────────────────────────────
 
@@ -385,37 +451,61 @@ function setLang(code) {
   if (code) langEl.textContent = LANG_LABELS[code] ?? code.slice(0,2).toUpperCase();
 }
 
-function appendTranscript(sourceLang, targetLang, original, translated) {
+function buildBubble(entryId, sourceLang, targetLang, original, translated) {
   const entry = document.createElement('div');
   entry.className = `transcript-entry speaker-${sourceLang}`;
+  entry.dataset.entryId = entryId;
+  entry.dataset.text = original;
+  entry.dataset.sourceLang = sourceLang;
+  entry.dataset.targetLang = targetLang ?? '';
 
   const bubble = document.createElement('div');
   bubble.className = 'bubble';
 
   const label = document.createElement('span');
   label.className = 'bubble-label';
-  label.textContent = LANG_LABELS[sourceLang] ?? sourceLang.toUpperCase();
+  label.title = 'Klik om taal te corrigeren';
+  label.textContent = (LANG_LABELS[sourceLang] ?? sourceLang.toUpperCase()) + ' ✎';
+  label.addEventListener('click', (e) => { e.stopPropagation(); showCorrectionPopover(entry, label); });
 
   const originalLine = document.createElement('p');
   originalLine.className = 'bubble-text';
-  originalLine.dir = sourceLang === 'fa' ? 'rtl' : 'ltr';
+  originalLine.dir = sourceLang === 'fa' || sourceLang === 'ar' ? 'rtl' : 'ltr';
   originalLine.textContent = original;
 
   bubble.appendChild(label);
   bubble.appendChild(originalLine);
   entry.appendChild(bubble);
 
-  // Only show translation line if there is one
+  const translationEl = document.createElement('p');
+  translationEl.className = 'translation';
   if (targetLang && translated) {
-    const translatedLine = document.createElement('p');
-    translatedLine.className = 'translation';
-    translatedLine.dir = targetLang === 'fa' ? 'rtl' : 'ltr';
-    translatedLine.textContent = `${LANG_LABELS[targetLang] ?? targetLang.toUpperCase()}: ${translated}`;
-    entry.appendChild(translatedLine);
+    translationEl.dir = targetLang === 'fa' || targetLang === 'ar' ? 'rtl' : 'ltr';
+    translationEl.textContent = `${LANG_LABELS[targetLang] ?? targetLang.toUpperCase()}: ${translated}`;
   }
+  entry.appendChild(translationEl);
 
+  return { entry, label, originalLine, translationEl };
+}
+
+function appendTranscript(entryId, sourceLang, targetLang, original, translated) {
+  const { entry } = buildBubble(entryId, sourceLang, targetLang, original, translated);
+  entryElements.set(entryId, entry);
   transcriptEl.appendChild(entry);
   transcriptEl.scrollTop = transcriptEl.scrollHeight;
+}
+
+function updateTranscript(entryId, sourceLang, targetLang, original, translated) {
+  const existing = entryElements.get(entryId);
+  if (!existing) return;
+
+  const { entry } = buildBubble(entryId, sourceLang, targetLang, original, translated);
+  existing.replaceWith(entry);
+  entryElements.set(entryId, entry);
+
+  // Show a brief flash to indicate it was updated
+  entry.classList.add('updated');
+  setTimeout(() => entry.classList.remove('updated'), 1000);
 }
 
 function appendError(text) {

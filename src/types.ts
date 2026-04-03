@@ -1,7 +1,7 @@
 // ── Messages: Browser → Server ────────────────────────────────────────────
 
 export type Mode = 'auto' | 'manual';
-export type Speaker = string; // open-ended: 'nl' | 'fa' | 'en' | ...
+export type Speaker = string;
 
 export interface AudioChunkMessage {
   type: 'audio_chunk';
@@ -24,6 +24,14 @@ export interface SetLanguagesMessage {
   lang2: Speaker;
 }
 
+export interface RedoEntryMessage {
+  type: 'redo_entry';
+  entryId: string;
+  text: string;
+  sourceLang: Speaker;
+  targetLang: Speaker | null;
+}
+
 export interface GenerateReportMessage {
   type: 'generate_report';
 }
@@ -33,6 +41,7 @@ export type ClientMessage =
   | ManualCommitMessage
   | ModeSwitchMessage
   | SetLanguagesMessage
+  | RedoEntryMessage
   | GenerateReportMessage;
 
 // ── Messages: Server → Browser ────────────────────────────────────────────
@@ -45,11 +54,21 @@ export interface PartialTranscriptMessage {
 
 export interface CommittedTranscriptMessage {
   type: 'committed_transcript';
+  entryId: string;
   text: string;
   language: Speaker;
-  targetLanguage: Speaker | null; // null = transcription only (same language)
+  targetLanguage: Speaker | null;
   translated: string;
   timestamp: string;
+}
+
+export interface CorrectedTranscriptMessage {
+  type: 'corrected_transcript';
+  entryId: string;
+  text: string;
+  language: Speaker;
+  targetLanguage: Speaker | null;
+  translated: string;
 }
 
 export interface TtsAudioMessage {
@@ -79,6 +98,7 @@ export interface ErrorMessage {
 export type ServerMessage =
   | PartialTranscriptMessage
   | CommittedTranscriptMessage
+  | CorrectedTranscriptMessage
   | TtsAudioMessage
   | TtsEndMessage
   | ReportMessage
@@ -88,6 +108,7 @@ export type ServerMessage =
 // ── Domain types ──────────────────────────────────────────────────────────
 
 export interface TranscriptEntry {
+  id: string;
   speaker: Speaker;
   original: string;
   translated: string;

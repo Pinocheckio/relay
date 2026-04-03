@@ -8,7 +8,7 @@ import { fileURLToPath } from 'url';
 import { SttClient } from './stt.js';
 import { translate, detectSpeaker, isNonLatin, normalizeScript } from './translator.js';
 import { synthesize } from './tts.js';
-import { createSession, addEntry, generateReport } from './session.js';
+import { createSession, addEntry, updateEntry, makeEntryId, generateReport } from './session.js';
 import type { ClientMessage, Session, Speaker } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -131,8 +131,10 @@ wss.on('connection', (clientWs: WebSocket) => {
       const translated = targetSpeaker ? await translate(nativeText, detectedSpeaker, targetSpeaker) : '';
       if (targetSpeaker) console.log(`[translate] [${detectedSpeaker}->${targetSpeaker}]: ${translated}`);
 
+      const entryId = makeEntryId();
       send({
         type: 'committed_transcript',
+        entryId,
         text: nativeText,
         language: detectedSpeaker,
         targetLanguage: targetSpeaker,
@@ -140,7 +142,7 @@ wss.on('connection', (clientWs: WebSocket) => {
         timestamp: new Date().toISOString(),
       });
 
-      addEntry(session, { speaker: detectedSpeaker, original: nativeText, translated, timestamp: new Date() });
+      addEntry(session, { id: entryId, speaker: detectedSpeaker, original: nativeText, translated, timestamp: new Date() });
 
       if (targetSpeaker && translated) {
         const voiceId = VOICES[targetSpeaker] ?? VOICE_NL;
@@ -200,6 +202,34 @@ wss.on('connection', (clientWs: WebSocket) => {
           send({ type: 'status', text: `Taalkeuze: ${msg.lang1.toUpperCase()} ↔ ${msg.lang2.toUpperCase()}` });
         }
         break;
+
+      case 'redo_entry': {
+        const { entryId, text, sourceLang, targetLang } = msg;
+        try {
+          const nativeText = await normalizeScript(text, sourceLang);
+          const translated = targetLang ? await translate(nativeText, sourceLang, targetLang) : '';
+          send({
+            type: 'corrected_transcript',
+            entryId,
+            text: nativeText,
+            language: sourceLang,
+            targetLanguage: targetLang,
+            translated,
+          });
+          updateEntry(session, entryId, { speaker: sourceLang, original: nativeText, translated });
+          if (targetLang && translated) {
+            const voiceId = VOICES[targetLang] ?? VOICE_NL;
+            await synthesize(translated, targetLang, ELEVENLABS_API_KEY, voiceId, (chunk) => {
+              send({ type: 'tts_audio', data: chunk });
+            });
+            send({ type: 'tts_end' });
+          }
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          send({ type: 'error', text: `Redo fout: ${errMsg}` });
+        }
+        break;
+      }
 
       case 'generate_report': {
         send({ type: 'status', text: 'Verslag genereren...' });

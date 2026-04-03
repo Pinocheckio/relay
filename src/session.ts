@@ -14,8 +14,19 @@ export function createSession(lang1: Speaker = 'nl', lang2: Speaker = 'fa'): Ses
   };
 }
 
+let entryCounter = 0;
+
+export function makeEntryId(): string {
+  return `e${Date.now()}-${++entryCounter}`;
+}
+
 export function addEntry(session: Session, entry: TranscriptEntry): void {
   session.entries.push(entry);
+}
+
+export function updateEntry(session: Session, id: string, patch: Partial<TranscriptEntry>): void {
+  const entry = session.entries.find(e => e.id === id);
+  if (entry) Object.assign(entry, patch);
 }
 
 export function getFullTranscript(session: Session): string {

@@ -424,6 +424,60 @@ html, body {
   min-width: 2rem;
 }
 
+/* ── Correction popover ──────────────────────────────────────────────── */
+
+.correction-popover {
+  position: absolute;
+  background: #1f2937;
+  border: 1px solid #374151;
+  border-radius: 10px;
+  padding: 0.5rem 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  z-index: 200;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+}
+
+.correction-popover.hidden { display: none; }
+
+.correction-hint {
+  font-size: 0.72rem;
+  color: #9ca3af;
+  white-space: nowrap;
+}
+
+.correction-langs { display: flex; gap: 0.35rem; }
+
+.correction-lang-btn {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: #374151;
+  color: #f9fafb;
+  border: 1px solid #4b5563;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.correction-lang-btn:hover { background: #4b5563; }
+.correction-lang-btn.current { background: var(--accent); border-color: var(--accent); }
+
+/* Flash animation when a bubble is updated */
+.transcript-entry.updated .bubble {
+  animation: flash 0.6s ease;
+}
+
+@keyframes flash {
+  0%, 100% { opacity: 1; }
+  40% { opacity: 0.4; }
+}
+
+/* Edit cursor on bubble label */
+.bubble-label { cursor: pointer; }
+.bubble-label:hover { opacity: 0.8; }
+
 /* ── Audio level meter ───────────────────────────────────────────────── */
 
 .level-bar-wrap {
