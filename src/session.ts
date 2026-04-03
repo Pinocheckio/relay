@@ -1,15 +1,16 @@
 import OpenAI from 'openai';
-import type { Session, TranscriptEntry, Speaker, LanguagePair } from './types.js';
+import type { Session, TranscriptEntry, Speaker } from './types.js';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-export function createSession(pair: LanguagePair = 'nl-fa'): Session {
+export function createSession(lang1: Speaker = 'nl', lang2: Speaker = 'fa'): Session {
   return {
     id: Date.now().toString(),
     startTime: new Date(),
     entries: [],
     mode: 'auto',
-    pair,
+    lang1,
+    lang2,
   };
 }
 

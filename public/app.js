@@ -58,9 +58,10 @@ let sourceNode = null;
 let resampleNode = null;  // OfflineAudioContext for resampling isn't needed; we resample inline.
 
 let currentMode = 'auto';
-let currentPair = 'nl-fa';
+let currentLang1 = 'nl';
+let currentLang2 = 'fa';
 let isRecording = false;
-let activePttSpeaker = null;   // 'nl' | 'fa' | 'en' | null
+let activePttSpeaker = null;
 
 // TTS playback queue
 const ttsChunks = [];
@@ -89,6 +90,8 @@ const ttsIndicator = document.getElementById('tts-indicator');
 const connectBtn = document.getElementById('btn-connect');
 const levelFill = document.getElementById('level-fill');
 const levelStatus = document.getElementById('level-status');
+const selectLang1 = document.getElementById('select-lang1');
+const selectLang2 = document.getElementById('select-lang2');
 
 let lastLevelUpdate = 0;
 
@@ -103,8 +106,8 @@ function connectWs() {
     setStatus('Verbonden');
     connectBtn.textContent = 'Verbreken';
     connectBtn.classList.add('connected');
-    // Sync current pair selection to server (user may have changed it before connecting)
-    ws.send(JSON.stringify({ type: 'set_pair', pair: currentPair }));
+    // Sync current language selection to server
+    ws.send(JSON.stringify({ type: 'set_languages', lang1: currentLang1, lang2: currentLang2 }));
   };
 
   ws.onclose = () => {
@@ -159,6 +162,7 @@ function handleServerMessage(msg) {
       setLang(msg.language);
       appendTranscript(msg.language, msg.targetLanguage, msg.text, msg.translated);
       break;
+
 
     case 'tts_audio':
       ttsChunks.push(msg.data);
@@ -388,24 +392,28 @@ function appendTranscript(sourceLang, targetLang, original, translated) {
   const bubble = document.createElement('div');
   bubble.className = 'bubble';
 
+  const label = document.createElement('span');
+  label.className = 'bubble-label';
+  label.textContent = LANG_LABELS[sourceLang] ?? sourceLang.toUpperCase();
+
   const originalLine = document.createElement('p');
   originalLine.className = 'bubble-text';
   originalLine.dir = sourceLang === 'fa' ? 'rtl' : 'ltr';
   originalLine.textContent = original;
 
-  const label = document.createElement('span');
-  label.className = 'bubble-label';
-  label.textContent = LANG_LABELS[sourceLang] ?? sourceLang.toUpperCase();
-
-  const translatedLine = document.createElement('p');
-  translatedLine.className = 'translation';
-  translatedLine.dir = targetLang === 'fa' ? 'rtl' : 'ltr';
-  translatedLine.textContent = `${LANG_LABELS[targetLang] ?? targetLang.toUpperCase()}: ${translated}`;
-
   bubble.appendChild(label);
   bubble.appendChild(originalLine);
   entry.appendChild(bubble);
-  entry.appendChild(translatedLine);
+
+  // Only show translation line if there is one
+  if (targetLang && translated) {
+    const translatedLine = document.createElement('p');
+    translatedLine.className = 'translation';
+    translatedLine.dir = targetLang === 'fa' ? 'rtl' : 'ltr';
+    translatedLine.textContent = `${LANG_LABELS[targetLang] ?? targetLang.toUpperCase()}: ${translated}`;
+    entry.appendChild(translatedLine);
+  }
+
   transcriptEl.appendChild(entry);
   transcriptEl.scrollTop = transcriptEl.scrollHeight;
 }
@@ -444,35 +452,35 @@ connectBtn.addEventListener('click', () => {
 modeAutoBtn.addEventListener('click', () => setMode('auto'));
 modeManuBtn.addEventListener('click', () => setMode('manual'));
 
-function updatePttLabels(pair) {
-  const [a, b] = pair.split('-');
-  pttALabel.textContent = a.toUpperCase();
-  pttBLabel.textContent = b.toUpperCase();
-  // Update button color class to match language
-  pttABtn.className = `btn-ptt btn-ptt-${a}`;
-  pttBBtn.className = `btn-ptt btn-ptt-${b}`;
+function updatePttLabels() {
+  pttALabel.textContent = currentLang1.toUpperCase();
+  pttBLabel.textContent = currentLang2.toUpperCase();
+  pttABtn.className = `btn-ptt btn-ptt-${currentLang1}`;
+  pttBBtn.className = `btn-ptt btn-ptt-${currentLang2}`;
 }
 
-document.querySelectorAll('.pair-toggle .btn-mode').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const pair = btn.dataset.pair;
-    if (!pair || pair === currentPair) return;
-    currentPair = pair;
-    document.querySelectorAll('.pair-toggle .btn-mode').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    updatePttLabels(pair);
-    sendWs({ type: 'set_pair', pair });
-  });
+function sendLanguages() {
+  sendWs({ type: 'set_languages', lang1: currentLang1, lang2: currentLang2 });
+  updatePttLabels();
+}
+
+selectLang1.addEventListener('change', () => {
+  currentLang1 = selectLang1.value;
+  sendLanguages();
 });
 
-// PTT: mouse + touch support — language determined by current pair
+selectLang2.addEventListener('change', () => {
+  currentLang2 = selectLang2.value;
+  sendLanguages();
+});
+
 ['mousedown', 'touchstart'].forEach(evt => {
-  pttABtn.addEventListener(evt, (e) => { e.preventDefault(); pttStart(currentPair.split('-')[0]); });
-  pttBBtn.addEventListener(evt, (e) => { e.preventDefault(); pttStart(currentPair.split('-')[1]); });
+  pttABtn.addEventListener(evt, (e) => { e.preventDefault(); pttStart(currentLang1); });
+  pttBBtn.addEventListener(evt, (e) => { e.preventDefault(); pttStart(currentLang2); });
 });
 ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(evt => {
-  pttABtn.addEventListener(evt, () => pttEnd(currentPair.split('-')[0]));
-  pttBBtn.addEventListener(evt, () => pttEnd(currentPair.split('-')[1]));
+  pttABtn.addEventListener(evt, () => pttEnd(currentLang1));
+  pttBBtn.addEventListener(evt, () => pttEnd(currentLang2));
 });
 
 generateReportBtn.addEventListener('click', () => {
@@ -489,4 +497,4 @@ copyReportBtn.addEventListener('click', () => {
 // ── Init ──────────────────────────────────────────────────────────────────
 
 setMode('auto');
-updatePttLabels(currentPair);
+updatePttLabels();

@@ -1,38 +1,34 @@
 import OpenAI from 'openai';
-import type { Speaker, LanguagePair } from './types.js';
+import type { Speaker } from './types.js';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const LANG_NAMES: Record<Speaker, string> = {
+const LANG_NAMES: Record<string, string> = {
   nl: 'Dutch',
   fa: 'Farsi (Persian)',
   en: 'English',
 };
 
-// Map ElevenLabs BCP-47 language codes to our Speaker type
+function langName(code: Speaker): string {
+  return LANG_NAMES[code] ?? code.toUpperCase();
+}
+
+// Map ElevenLabs BCP-47 codes to our Speaker codes
 export function detectSpeaker(languageCode: string): Speaker | null {
   const code = languageCode.toLowerCase();
   if (code.startsWith('nl')) return 'nl';
   if (code.startsWith('fa') || code.startsWith('per')) return 'fa';
   if (code.startsWith('en')) return 'en';
-  return null; // unknown language
-}
-
-// Given a detected speaker and an active pair, return the target language to translate to.
-// Returns null if the detected language is not part of the pair (ignore the utterance).
-export function getTargetLanguage(speaker: Speaker, pair: LanguagePair): Speaker | null {
-  const [a, b] = pair.split('-') as [Speaker, Speaker];
-  if (speaker === a) return b;
-  if (speaker === b) return a;
-  return null;
+  // Return the raw 2-letter code for other languages
+  const base = code.slice(0, 2);
+  return base || null;
 }
 
 export async function translate(text: string, from: Speaker, to: Speaker): Promise<string> {
   const systemPrompt =
     `You are a professional interpreter in a social care conversation. ` +
-    `Translate faithfully from ${LANG_NAMES[from]} to ${LANG_NAMES[to]}, ` +
+    `Translate faithfully from ${langName(from)} to ${langName(to)}, ` +
     `preserving the speaker's tone, register, and intent. ` +
-    `Do not add, omit, or interpret. Keep it natural and conversational. ` +
     `Return only the translation — no explanations, no quotes, no annotations.`;
 
   const completion = await openai.chat.completions.create({

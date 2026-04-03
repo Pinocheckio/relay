@@ -1,12 +1,11 @@
 // ── Messages: Browser → Server ────────────────────────────────────────────
 
 export type Mode = 'auto' | 'manual';
-export type Speaker = 'nl' | 'fa' | 'en';
-export type LanguagePair = 'nl-fa' | 'nl-en' | 'fa-en';
+export type Speaker = string; // open-ended: 'nl' | 'fa' | 'en' | ...
 
 export interface AudioChunkMessage {
   type: 'audio_chunk';
-  data: string;   // base64-encoded Int16 PCM at 16kHz
+  data: string;
   mode: Mode;
 }
 
@@ -19,9 +18,10 @@ export interface ModeSwitchMessage {
   mode: Mode;
 }
 
-export interface SetPairMessage {
-  type: 'set_pair';
-  pair: LanguagePair;
+export interface SetLanguagesMessage {
+  type: 'set_languages';
+  lang1: Speaker;
+  lang2: Speaker;
 }
 
 export interface GenerateReportMessage {
@@ -32,7 +32,7 @@ export type ClientMessage =
   | AudioChunkMessage
   | ManualCommitMessage
   | ModeSwitchMessage
-  | SetPairMessage
+  | SetLanguagesMessage
   | GenerateReportMessage;
 
 // ── Messages: Server → Browser ────────────────────────────────────────────
@@ -47,14 +47,14 @@ export interface CommittedTranscriptMessage {
   type: 'committed_transcript';
   text: string;
   language: Speaker;
-  targetLanguage: Speaker;
+  targetLanguage: Speaker | null; // null = transcription only (same language)
   translated: string;
   timestamp: string;
 }
 
 export interface TtsAudioMessage {
   type: 'tts_audio';
-  data: string;   // base64-encoded MP3 chunk
+  data: string;
 }
 
 export interface TtsEndMessage {
@@ -99,5 +99,6 @@ export interface Session {
   startTime: Date;
   entries: TranscriptEntry[];
   mode: Mode;
-  pair: LanguagePair;
+  lang1: Speaker;
+  lang2: Speaker;
 }

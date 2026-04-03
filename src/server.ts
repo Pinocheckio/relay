@@ -6,19 +6,18 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 import { SttClient } from './stt.js';
-import { translate, detectSpeaker, getTargetLanguage } from './translator.js';
+import { translate, detectSpeaker } from './translator.js';
 import { synthesize } from './tts.js';
 import { createSession, addEntry, generateReport } from './session.js';
-import type { ClientMessage, Session, LanguagePair } from './types.js';
+import type { ClientMessage, Session, Speaker } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY ?? '';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? '';
-// Distinct voices per output language for demo clarity
-const VOICE_NL = process.env.ELEVENLABS_VOICE_NL ?? 'nPczCjzI2devNBz1zQrb'; // Brian — Dutch output
-const VOICE_FA = process.env.ELEVENLABS_VOICE_FA ?? '9BWtsMINqrJLrRacOk9x'; // Aria — Farsi output
-const VOICE_EN = process.env.ELEVENLABS_VOICE_EN ?? 'nPczCjzI2devNBz1zQrb'; // Brian — English output (natural)
+const VOICE_NL = process.env.ELEVENLABS_VOICE_NL ?? 'nPczCjzI2devNBz1zQrb';
+const VOICE_FA = process.env.ELEVENLABS_VOICE_FA ?? '9BWtsMINqrJLrRacOk9x';
+const VOICE_EN = process.env.ELEVENLABS_VOICE_EN ?? 'nPczCjzI2devNBz1zQrb';
 const VOICES: Record<string, string> = { nl: VOICE_NL, fa: VOICE_FA, en: VOICE_EN };
 const PORT = Number(process.env.PORT ?? 3000);
 
@@ -37,17 +36,9 @@ app.get('/', (_req, res) => {
 
 app.post('/api/auth', (req, res) => {
   const accessCode = process.env.ACCESS_CODE;
-  if (!accessCode) {
-    // No code configured — open access
-    res.json({ ok: true });
-    return;
-  }
+  if (!accessCode) { res.json({ ok: true }); return; }
   const { code } = req.body as { code?: string };
-  if (code === accessCode) {
-    res.json({ ok: true });
-  } else {
-    res.status(401).json({ ok: false });
-  }
+  res.status(code === accessCode ? 200 : 401).json({ ok: code === accessCode });
 });
 
 // ── HTTP server + WebSocket server ────────────────────────────────────────
@@ -58,54 +49,48 @@ const wss = new WebSocketServer({ server });
 wss.on('connection', (clientWs: WebSocket) => {
   console.log('[relay] Client connected');
 
-  const session: Session = createSession('nl-fa');
+  const session: Session = createSession('nl', 'fa');
   const stt = new SttClient(ELEVENLABS_API_KEY);
   let ttsPlaying = false;
 
   function send(msg: object): void {
-    if (clientWs.readyState === WebSocket.OPEN) {
-      clientWs.send(JSON.stringify(msg));
-    }
+    if (clientWs.readyState === WebSocket.OPEN) clientWs.send(JSON.stringify(msg));
   }
 
   // ── STT event handlers ──────────────────────────────────────────────────
 
-  stt.on('connected', () => {
-    send({ type: 'status', text: 'Verbonden — klaar om te luisteren.' });
-  });
-
-  stt.on('disconnected', () => {
-    send({ type: 'status', text: 'Verbinding verbroken. Opnieuw verbinden...' });
-  });
-
+  stt.on('connected', () => send({ type: 'status', text: 'Verbonden — klaar om te luisteren.' }));
+  stt.on('disconnected', () => send({ type: 'status', text: 'Verbinding verbroken. Opnieuw verbinden...' }));
   stt.on('error', (err: Error) => {
     console.error('[stt] error', err.message);
     send({ type: 'error', text: `STT fout: ${err.message}` });
   });
-
   stt.on('partial', (text: string, language: string) => {
     send({ type: 'partial_transcript', text, language });
   });
 
   stt.on('committed', async (text: string, languageCode: string) => {
     const speaker = detectSpeaker(languageCode);
-    if (!speaker) {
-      console.log(`[stt] unknown language ${languageCode}, skipping`);
-      return;
-    }
-
-    const targetSpeaker = getTargetLanguage(speaker, session.pair);
-    if (!targetSpeaker) {
-      console.log(`[stt] language ${speaker} not in active pair ${session.pair}, skipping`);
-      send({ type: 'status', text: `Taal "${languageCode}" niet in actief taalpaar. Wissel het taalpaar in de UI.` });
-      return;
-    }
+    if (!speaker) { console.log(`[stt] unknown language ${languageCode}, skipping`); return; }
 
     console.log(`[stt] committed [${speaker}]: ${text}`);
 
+    // Determine target language
+    const sameLanguage = session.lang1 === session.lang2;
+    let targetSpeaker: Speaker | null = null;
+
+    if (!sameLanguage) {
+      if (speaker === session.lang1) targetSpeaker = session.lang2;
+      else if (speaker === session.lang2) targetSpeaker = session.lang1;
+      else {
+        send({ type: 'status', text: `Taal "${languageCode}" niet ingesteld. Wijzig de taalkeuze.` });
+        return;
+      }
+    }
+
     try {
-      const translated = await translate(text, speaker, targetSpeaker);
-      console.log(`[translate] [${speaker}->${targetSpeaker}]: ${translated}`);
+      const translated = targetSpeaker ? await translate(text, speaker, targetSpeaker) : '';
+      if (targetSpeaker) console.log(`[translate] [${speaker}->${targetSpeaker}]: ${translated}`);
 
       send({
         type: 'committed_transcript',
@@ -116,29 +101,26 @@ wss.on('connection', (clientWs: WebSocket) => {
         timestamp: new Date().toISOString(),
       });
 
-      addEntry(session, {
-        speaker,
-        original: text,
-        translated,
-        timestamp: new Date(),
-      });
+      addEntry(session, { speaker, original: text, translated, timestamp: new Date() });
 
-      const voiceId = VOICES[targetSpeaker] ?? VOICE_NL;
-      ttsPlaying = true;
-      await synthesize(translated, targetSpeaker, ELEVENLABS_API_KEY, voiceId, (chunk) => {
-        send({ type: 'tts_audio', data: chunk });
-      });
-      ttsPlaying = false;
-      send({ type: 'tts_end' });
+      if (targetSpeaker && translated) {
+        const voiceId = VOICES[targetSpeaker] ?? VOICE_NL;
+        ttsPlaying = true;
+        await synthesize(translated, targetSpeaker, ELEVENLABS_API_KEY, voiceId, (chunk) => {
+          send({ type: 'tts_audio', data: chunk });
+        });
+        ttsPlaying = false;
+        send({ type: 'tts_end' });
+      }
     } catch (err) {
       ttsPlaying = false;
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error('[pipeline] error', msg);
-      send({ type: 'error', text: `Pipeline fout: ${msg}` });
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error('[pipeline] error', errMsg);
+      send({ type: 'error', text: `Pipeline fout: ${errMsg}` });
     }
   });
 
-  // ── Start STT connection ────────────────────────────────────────────────
+  // ── Start STT ──────────────────────────────────────────────────────────
 
   stt.connect(session.mode);
   send({ type: 'status', text: 'Verbinden met spraakherkenning...' });
@@ -147,11 +129,7 @@ wss.on('connection', (clientWs: WebSocket) => {
 
   clientWs.on('message', async (raw: WebSocket.RawData) => {
     let msg: ClientMessage;
-    try {
-      msg = JSON.parse(raw.toString()) as ClientMessage;
-    } catch {
-      return;
-    }
+    try { msg = JSON.parse(raw.toString()) as ClientMessage; } catch { return; }
 
     switch (msg.type) {
       case 'audio_chunk':
@@ -170,9 +148,14 @@ wss.on('connection', (clientWs: WebSocket) => {
         }
         break;
 
-      case 'set_pair':
-        session.pair = msg.pair as LanguagePair;
-        send({ type: 'status', text: `Taalpaar: ${msg.pair.toUpperCase().replace('-', ' ↔ ')}` });
+      case 'set_languages':
+        session.lang1 = msg.lang1;
+        session.lang2 = msg.lang2;
+        if (msg.lang1 === msg.lang2) {
+          send({ type: 'status', text: `Alleen opname — geen vertaling (${msg.lang1.toUpperCase()})` });
+        } else {
+          send({ type: 'status', text: `Taalkeuze: ${msg.lang1.toUpperCase()} ↔ ${msg.lang2.toUpperCase()}` });
+        }
         break;
 
       case 'generate_report': {
@@ -189,17 +172,8 @@ wss.on('connection', (clientWs: WebSocket) => {
     }
   });
 
-  clientWs.on('close', () => {
-    console.log('[relay] Client disconnected');
-    stt.disconnect();
-  });
-
-  clientWs.on('error', (err: Error) => {
-    console.error('[ws] client error', err.message);
-    stt.disconnect();
-  });
+  clientWs.on('close', () => { console.log('[relay] Client disconnected'); stt.disconnect(); });
+  clientWs.on('error', (err: Error) => { console.error('[ws] client error', err.message); stt.disconnect(); });
 });
 
-server.listen(PORT, () => {
-  console.log(`[relay] Running on http://localhost:${PORT}`);
-});
+server.listen(PORT, () => console.log(`[relay] Running on http://localhost:${PORT}`));

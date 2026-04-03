@@ -185,6 +185,38 @@ html, body {
   color: #9ca3af;
 }
 
+/* ── Language selectors ──────────────────────────────────────────────── */
+
+.lang-selectors {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.lang-select {
+  background: rgba(255,255,255,0.12);
+  color: #f9fafb;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 7px;
+  padding: 0.28rem 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  text-align: center;
+  min-width: 52px;
+}
+
+.lang-select option { background: #1f2937; color: #f9fafb; }
+.lang-select:focus { border-color: var(--accent); }
+
+.lang-arrow {
+  color: #9ca3af;
+  font-size: 0.85rem;
+}
+
 /* ── Mode toggle ─────────────────────────────────────────────────────── */
 
 .mode-toggle {
