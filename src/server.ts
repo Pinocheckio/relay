@@ -33,6 +33,21 @@ app.get('/', (_req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
 
+app.post('/api/auth', (req, res) => {
+  const accessCode = process.env.ACCESS_CODE;
+  if (!accessCode) {
+    // No code configured — open access
+    res.json({ ok: true });
+    return;
+  }
+  const { code } = req.body as { code?: string };
+  if (code === accessCode) {
+    res.json({ ok: true });
+  } else {
+    res.status(401).json({ ok: false });
+  }
+});
+
 // ── HTTP server + WebSocket server ────────────────────────────────────────
 
 const server = createServer(app);

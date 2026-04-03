@@ -2,6 +2,52 @@
  * Relay — client-side audio capture, WebSocket relay, TTS playback, UI logic.
  */
 
+// ── Auth ──────────────────────────────────────────────────────────────────
+
+const authOverlay = document.getElementById('auth-overlay');
+const authInput   = document.getElementById('auth-input');
+const authBtn     = document.getElementById('auth-btn');
+const authError   = document.getElementById('auth-error');
+
+async function checkAuth(code) {
+  const res = await fetch('/api/auth', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  });
+  return res.ok;
+}
+
+async function submitAuth() {
+  const code = authInput.value.trim();
+  if (!code) return;
+  authBtn.disabled = true;
+  const ok = await checkAuth(code);
+  authBtn.disabled = false;
+  if (ok) {
+    sessionStorage.setItem('relay_auth', '1');
+    authOverlay.classList.add('hidden');
+  } else {
+    authError.textContent = 'Onjuiste code. Probeer opnieuw.';
+    authInput.classList.add('shake');
+    authInput.value = '';
+    authInput.addEventListener('animationend', () => authInput.classList.remove('shake'), { once: true });
+  }
+}
+
+authBtn.addEventListener('click', submitAuth);
+authInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitAuth(); });
+
+// Skip overlay if already authed this session or no code is set
+if (sessionStorage.getItem('relay_auth') === '1') {
+  authOverlay.classList.add('hidden');
+} else {
+  // Check if server requires auth at all
+  checkAuth('').then(ok => {
+    if (ok) authOverlay.classList.add('hidden'); // no ACCESS_CODE set = open
+  });
+}
+
 // ── State ─────────────────────────────────────────────────────────────────
 
 let ws = null;

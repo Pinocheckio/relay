@@ -11,6 +11,18 @@
 </head>
 <body>
 
+  <!-- ── Access code overlay ──────────────────────────────────────────── -->
+  <div id="auth-overlay" class="auth-overlay">
+    <div class="auth-card">
+      <p class="auth-logo">Relay</p>
+      <p class="auth-label">Toegangscode</p>
+      <input id="auth-input" class="auth-input" type="password"
+             placeholder="••••••" autocomplete="off" inputmode="numeric" />
+      <button id="auth-btn" class="auth-btn">Ga verder</button>
+      <p id="auth-error" class="auth-error"></p>
+    </div>
+  </div>
+
   <!-- ── Header ───────────────────────────────────────────────────────── -->
   <header class="header">
     <div class="header-left">
