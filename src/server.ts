@@ -6,10 +6,10 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 import { SttClient } from './stt.js';
-import { translate, detectSpeaker } from './translator.js';
+import { translate, detectSpeaker, getTargetLanguage } from './translator.js';
 import { synthesize } from './tts.js';
 import { createSession, addEntry, generateReport } from './session.js';
-import type { ClientMessage, Session } from './types.js';
+import type { ClientMessage, Session, LanguagePair } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -18,6 +18,8 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? '';
 // Distinct voices per output language for demo clarity
 const VOICE_NL = process.env.ELEVENLABS_VOICE_NL ?? 'nPczCjzI2devNBz1zQrb'; // Brian — Dutch output
 const VOICE_FA = process.env.ELEVENLABS_VOICE_FA ?? '9BWtsMINqrJLrRacOk9x'; // Aria — Farsi output
+const VOICE_EN = process.env.ELEVENLABS_VOICE_EN ?? 'nPczCjzI2devNBz1zQrb'; // Brian — English output (natural)
+const VOICES: Record<string, string> = { nl: VOICE_NL, fa: VOICE_FA, en: VOICE_EN };
 const PORT = Number(process.env.PORT ?? 3000);
 
 if (!ELEVENLABS_API_KEY) throw new Error('ELEVENLABS_API_KEY is not set');
@@ -56,7 +58,7 @@ const wss = new WebSocketServer({ server });
 wss.on('connection', (clientWs: WebSocket) => {
   console.log('[relay] Client connected');
 
-  const session: Session = createSession();
+  const session: Session = createSession('nl-fa');
   const stt = new SttClient(ELEVENLABS_API_KEY);
   let ttsPlaying = false;
 
@@ -87,16 +89,24 @@ wss.on('connection', (clientWs: WebSocket) => {
 
   stt.on('committed', async (text: string, languageCode: string) => {
     const speaker = detectSpeaker(languageCode);
-    const targetSpeaker = speaker === 'nl' ? 'fa' : 'nl';
+    if (!speaker) {
+      console.log(`[stt] unknown language ${languageCode}, skipping`);
+      return;
+    }
+
+    const targetSpeaker = getTargetLanguage(speaker, session.pair);
+    if (!targetSpeaker) {
+      console.log(`[stt] language ${speaker} not in active pair ${session.pair}, skipping`);
+      send({ type: 'status', text: `Taal "${languageCode}" niet in actief taalpaar. Wissel het taalpaar in de UI.` });
+      return;
+    }
 
     console.log(`[stt] committed [${speaker}]: ${text}`);
 
     try {
-      // Translate
-      const translated = await translate(text, speaker);
+      const translated = await translate(text, speaker, targetSpeaker);
       console.log(`[translate] [${speaker}->${targetSpeaker}]: ${translated}`);
 
-      // Tell browser the committed transcript + translation
       send({
         type: 'committed_transcript',
         text,
@@ -105,7 +115,6 @@ wss.on('connection', (clientWs: WebSocket) => {
         timestamp: new Date().toISOString(),
       });
 
-      // Store in session
       addEntry(session, {
         speaker,
         original: text,
@@ -113,8 +122,7 @@ wss.on('connection', (clientWs: WebSocket) => {
         timestamp: new Date(),
       });
 
-      // TTS: stream audio back to browser (use voice matching the target language)
-      const voiceId = targetSpeaker === 'nl' ? VOICE_NL : VOICE_FA;
+      const voiceId = VOICES[targetSpeaker] ?? VOICE_NL;
       ttsPlaying = true;
       await synthesize(translated, targetSpeaker, ELEVENLABS_API_KEY, voiceId, (chunk) => {
         send({ type: 'tts_audio', data: chunk });
@@ -159,6 +167,11 @@ wss.on('connection', (clientWs: WebSocket) => {
           stt.switchMode(msg.mode);
           send({ type: 'status', text: msg.mode === 'auto' ? 'Auto-modus actief.' : 'Handmatige modus actief.' });
         }
+        break;
+
+      case 'set_pair':
+        session.pair = msg.pair as LanguagePair;
+        send({ type: 'status', text: `Taalpaar: ${msg.pair.toUpperCase().replace('-', ' ↔ ')}` });
         break;
 
       case 'generate_report': {

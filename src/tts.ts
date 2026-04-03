@@ -7,6 +7,7 @@ const MODEL_ID = 'eleven_flash_v2_5';
 const LANGUAGE_CODES: Record<Speaker, string> = {
   nl: 'nl',
   fa: 'fa',
+  en: 'en',
 };
 
 export async function synthesize(

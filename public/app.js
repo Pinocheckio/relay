@@ -58,8 +58,9 @@ let sourceNode = null;
 let resampleNode = null;  // OfflineAudioContext for resampling isn't needed; we resample inline.
 
 let currentMode = 'auto';
+let currentPair = 'nl-fa';
 let isRecording = false;
-let activePttSpeaker = null;   // 'nl' | 'fa' | null
+let activePttSpeaker = null;   // 'nl' | 'fa' | 'en' | null
 
 // TTS playback queue
 const ttsChunks = [];
@@ -386,6 +387,17 @@ connectBtn.addEventListener('click', () => {
 
 modeAutoBtn.addEventListener('click', () => setMode('auto'));
 modeManuBtn.addEventListener('click', () => setMode('manual'));
+
+document.querySelectorAll('.pair-toggle .btn-mode').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const pair = btn.dataset.pair;
+    if (!pair || pair === currentPair) return;
+    currentPair = pair;
+    document.querySelectorAll('.pair-toggle .btn-mode').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    sendWs({ type: 'set_pair', pair });
+  });
+});
 
 // PTT: mouse + touch support
 ['mousedown', 'touchstart'].forEach(evt => {

@@ -1,7 +1,8 @@
 // ── Messages: Browser → Server ────────────────────────────────────────────
 
 export type Mode = 'auto' | 'manual';
-export type Speaker = 'nl' | 'fa';
+export type Speaker = 'nl' | 'fa' | 'en';
+export type LanguagePair = 'nl-fa' | 'nl-en' | 'fa-en';
 
 export interface AudioChunkMessage {
   type: 'audio_chunk';
@@ -18,6 +19,11 @@ export interface ModeSwitchMessage {
   mode: Mode;
 }
 
+export interface SetPairMessage {
+  type: 'set_pair';
+  pair: LanguagePair;
+}
+
 export interface GenerateReportMessage {
   type: 'generate_report';
 }
@@ -26,6 +32,7 @@ export type ClientMessage =
   | AudioChunkMessage
   | ManualCommitMessage
   | ModeSwitchMessage
+  | SetPairMessage
   | GenerateReportMessage;
 
 // ── Messages: Server → Browser ────────────────────────────────────────────
@@ -91,4 +98,5 @@ export interface Session {
   startTime: Date;
   entries: TranscriptEntry[];
   mode: Mode;
+  pair: LanguagePair;
 }
