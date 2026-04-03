@@ -232,7 +232,7 @@ function stopRecording() {
 
 // ── Audio level meter + client-side VAD ──────────────────────────────────
 
-const SPEECH_THRESHOLD = 0.001;  // RMS above this = speech detected (tuned low — bar shows actual range)
+const SPEECH_THRESHOLD = 0.01;   // noise floor ~0.00014, speech ~0.02+
 const SILENCE_MS = 900;          // ms of silence after speech before committing
 const MIN_SPEECH_MS = 250;       // ignore bursts shorter than this (avoid false triggers)
 
@@ -245,7 +245,7 @@ function updateLevel(rms) {
   levelFill.style.width = pct + '%';
   levelFill.classList.toggle('loud', pct > 60);
   levelFill.classList.toggle('clipping', pct > 90);
-  levelStatus.textContent = `rms: ${rms.toFixed(5)}`;
+  levelStatus.textContent = vadSpeaking ? '🗣 spreekt' : '—';
 
   // Only run VAD in auto mode when connected
   if (currentMode !== 'auto' || !ws || ws.readyState !== WebSocket.OPEN) return;
