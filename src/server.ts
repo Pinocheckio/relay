@@ -77,39 +77,50 @@ wss.on('connection', (clientWs: WebSocket) => {
 
     // Determine target language
     const sameLanguage = session.lang1 === session.lang2;
+    let detectedSpeaker = speaker;
     let targetSpeaker: Speaker | null = null;
 
     if (!sameLanguage) {
-      if (speaker === session.lang1) targetSpeaker = session.lang2;
-      else if (speaker === session.lang2) targetSpeaker = session.lang1;
-      else {
-        send({ type: 'status', text: `Taal "${languageCode}" niet ingesteld. Wijzig de taalkeuze.` });
-        return;
+      if (speaker === session.lang1) {
+        targetSpeaker = session.lang2;
+      } else if (speaker === session.lang2) {
+        targetSpeaker = session.lang1;
+      } else {
+        // Scribe misdetected the language (e.g. Farsi detected as Italian).
+        // Heuristic: lang1 is typically a well-known language (NL/EN) that Scribe
+        // detects reliably. If it's not lang1, treat it as lang2.
+        console.log(`[stt] lang "${speaker}" not in pair, falling back to lang2 (${session.lang2})`);
+        detectedSpeaker = session.lang2;
+        targetSpeaker = session.lang1;
       }
     }
 
     try {
-      const translated = targetSpeaker ? await translate(text, speaker, targetSpeaker) : '';
-      if (targetSpeaker) console.log(`[translate] [${speaker}->${targetSpeaker}]: ${translated}`);
+      const translated = targetSpeaker ? await translate(text, detectedSpeaker, targetSpeaker) : '';
+      if (targetSpeaker) console.log(`[translate] [${detectedSpeaker}->${targetSpeaker}]: ${translated}`);
 
       send({
         type: 'committed_transcript',
         text,
-        language: speaker,
+        language: detectedSpeaker,
         targetLanguage: targetSpeaker,
         translated,
         timestamp: new Date().toISOString(),
       });
 
-      addEntry(session, { speaker, original: text, translated, timestamp: new Date() });
+      addEntry(session, { speaker: detectedSpeaker, original: text, translated, timestamp: new Date() });
 
       if (targetSpeaker && translated) {
         const voiceId = VOICES[targetSpeaker] ?? VOICE_NL;
+        console.log(`[tts] synthesizing to ${targetSpeaker} using voice ${voiceId}`);
         ttsPlaying = true;
+        let chunkCount = 0;
         await synthesize(translated, targetSpeaker, ELEVENLABS_API_KEY, voiceId, (chunk) => {
+          chunkCount++;
           send({ type: 'tts_audio', data: chunk });
         });
         ttsPlaying = false;
+        console.log(`[tts] done — ${chunkCount} chunks sent`);
         send({ type: 'tts_end' });
       }
     } catch (err) {
