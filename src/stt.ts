@@ -8,6 +8,9 @@ const RECONNECT_DELAY_MS = 2000;
 const MAX_RECONNECT_ATTEMPTS = 5;
 const SAMPLE_RATE = 16000;
 
+// 10ms of PCM silence at 16kHz (160 Int16 samples = 320 zero bytes)
+const SILENT_COMMIT_CHUNK = Buffer.alloc(320).toString('base64');
+
 async function fetchSingleUseToken(apiKey: string): Promise<string> {
   const res = await fetch(TOKEN_URL, {
     method: 'POST',
@@ -121,8 +124,10 @@ export class SttClient extends EventEmitter {
       }
 
       case 'committed_transcript_with_timestamps': {
-        const text = ((msg.transcript as Record<string, unknown>)?.text as string | undefined) ?? '';
+        // text is top-level, not nested under transcript
+        const text = (msg.text as string | undefined) ?? '';
         const lang = (msg.language_code as string | undefined) ?? '';
+        console.log(`[stt] committed_with_timestamps: "${text}" lang=${lang}`);
         if (text) this.emit('committed', text, lang);
         break;
       }
@@ -178,9 +183,10 @@ export class SttClient extends EventEmitter {
 
   commitManual(): void {
     if (this.ws?.readyState !== WebSocket.OPEN) return;
+    console.log('[stt] sending commit');
     this.ws.send(JSON.stringify({
       message_type: 'input_audio_chunk',
-      audio_base_64: '',
+      audio_base_64: SILENT_COMMIT_CHUNK,
       sample_rate: SAMPLE_RATE,
       commit: true,
     }));
