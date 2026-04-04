@@ -23,6 +23,43 @@
     </div>
   </div>
 
+  <!-- ── Onboarding overlay ──────────────────────────────────────────── -->
+  <div id="onboarding-overlay" class="onboarding-overlay hidden">
+    <div class="onboarding-card">
+      <p class="onboarding-title">Relay</p>
+      <p class="onboarding-subtitle">Wie zijn er aanwezig?</p>
+
+      <form id="participant-form" class="participant-form" autocomplete="off">
+        <input id="p-name" type="text" class="p-input" placeholder="Naam" maxlength="40" />
+        <select id="p-role" class="p-select">
+          <option value="care_worker">Zorgverlener</option>
+          <option value="family_member">Familie</option>
+          <option value="client">Cliënt</option>
+          <option value="interpreter">Tolk</option>
+          <option value="other">Anders</option>
+        </select>
+        <select id="p-lang" class="p-select">
+          <option value="nl" selected>NL</option>
+          <option value="en">EN</option>
+          <option value="fa">FA</option>
+          <option value="ar">AR</option>
+          <option value="tr">TR</option>
+          <option value="de">DE</option>
+          <option value="fr">FR</option>
+        </select>
+        <button type="submit" id="p-add-btn" class="p-add-btn">+ Voeg toe</button>
+      </form>
+
+      <div id="onboarding-participant-list" class="onboarding-participant-list"></div>
+
+      <p id="onboarding-hint" class="onboarding-hint">Voeg minimaal 2 deelnemers toe.</p>
+
+      <button id="btn-start-session" class="btn-start-session" disabled>
+        Start gesprek →
+      </button>
+    </div>
+  </div>
+
   <!-- ── Header ───────────────────────────────────────────────────────── -->
   <header class="header">
     <div class="header-left">
@@ -34,26 +71,44 @@
         <span class="tts-dot"></span>
         <span class="tts-label">Vertaling</span>
       </div>
-      <div class="lang-selectors">
-        <select id="select-lang1" class="lang-select">
-          <option value="nl" selected>NL</option>
-          <option value="en">EN</option>
-          <option value="fa">FA</option>
-        </select>
-        <span class="lang-arrow">↔</span>
-        <select id="select-lang2" class="lang-select">
-          <option value="nl">NL</option>
-          <option value="en">EN</option>
-          <option value="fa" selected>FA</option>
-        </select>
-      </div>
       <div class="mode-toggle">
         <button id="btn-mode-auto" class="btn-mode active">Auto</button>
         <button id="btn-mode-manual" class="btn-mode">Handmatig</button>
       </div>
-      <button id="btn-connect" class="btn-connect">Verbinden</button>
+      <button id="btn-disconnect" class="btn-disconnect hidden">Verbreken</button>
     </div>
   </header>
+
+  <!-- ── Participant panel ────────────────────────────────────────────── -->
+  <div id="participant-panel" class="participant-panel hidden">
+    <div id="participant-chips" class="participant-chips"></div>
+    <button id="btn-add-mid" class="btn-add-mid" title="Deelnemer toevoegen">+ Deelnemer</button>
+  </div>
+
+  <!-- ── Mid-session add participant form ────────────────────────────── -->
+  <div id="mid-session-form" class="mid-session-form hidden">
+    <form id="mid-participant-form" autocomplete="off">
+      <input id="mid-p-name" type="text" class="p-input" placeholder="Naam" maxlength="40" />
+      <select id="mid-p-role" class="p-select">
+        <option value="care_worker">Zorgverlener</option>
+        <option value="family_member">Familie</option>
+        <option value="client">Cliënt</option>
+        <option value="interpreter">Tolk</option>
+        <option value="other">Anders</option>
+      </select>
+      <select id="mid-p-lang" class="p-select">
+        <option value="nl" selected>NL</option>
+        <option value="en">EN</option>
+        <option value="fa">FA</option>
+        <option value="ar">AR</option>
+        <option value="tr">TR</option>
+        <option value="de">DE</option>
+        <option value="fr">FR</option>
+      </select>
+      <button type="submit" class="p-add-btn">Toevoegen</button>
+      <button type="button" id="btn-cancel-mid" class="btn-cancel-mid">×</button>
+    </form>
+  </div>
 
   <!-- ── Main content ──────────────────────────────────────────────────── -->
   <main class="main">
@@ -63,7 +118,6 @@
       <div id="transcript" class="transcript">
         <p class="transcript-placeholder">
           Klik op <strong>Verbinden</strong> om het gesprek te starten.
-          Relay vertaalt automatisch tussen Nederlands en Farsi.
         </p>
       </div>
 
@@ -95,12 +149,12 @@
     <div id="ptt-controls" class="ptt-controls hidden">
       <button id="btn-ptt-a" class="btn-ptt btn-ptt-nl">
         <span class="ptt-icon">🎙️</span>
-        <span id="ptt-a-label" class="ptt-lang">NL</span>
+        <span id="ptt-a-label" class="ptt-lang">Lang A</span>
         <span class="ptt-hint">Houd ingedrukt</span>
       </button>
-      <button id="btn-ptt-b" class="btn-ptt btn-ptt-fa">
+      <button id="btn-ptt-b" class="btn-ptt btn-ptt-b">
         <span class="ptt-icon">🎙️</span>
-        <span id="ptt-b-label" class="ptt-lang">FA</span>
+        <span id="ptt-b-label" class="ptt-lang">Lang B</span>
         <span class="ptt-hint">Hold to speak</span>
       </button>
     </div>
@@ -125,8 +179,15 @@
 
   <!-- Correction popover (shared, moved by JS) -->
   <div id="correction-popover" class="correction-popover hidden">
-    <span class="correction-hint">Corrigeer taal:</span>
-    <div id="correction-lang-btns" class="correction-langs"></div>
+    <div class="correction-section">
+      <span class="correction-hint">Wie heeft dit gezegd?</span>
+      <div id="correction-participant-btns" class="correction-participants"></div>
+    </div>
+    <div class="correction-divider-line"></div>
+    <div class="correction-section">
+      <span class="correction-hint">Taal corrigeren:</span>
+      <div id="correction-lang-btns" class="correction-langs"></div>
+    </div>
   </div>
 
   <script src="/app.js"></script>

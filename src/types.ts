@@ -1,7 +1,49 @@
-// ── Messages: Browser → Server ────────────────────────────────────────────
+// ── Domain types ──────────────────────────────────────────────────────────
 
 export type Mode = 'auto' | 'manual';
 export type Speaker = string;
+export type ParticipantRole = 'care_worker' | 'family_member' | 'client' | 'interpreter' | 'other';
+
+export interface Participant {
+  id: string;
+  name: string;
+  role: ParticipantRole;
+  language: Speaker;
+  isPresent: boolean;
+  joinedAt: Date;
+  presenceLog: Array<{ action: 'join' | 'leave'; at: Date }>;
+}
+
+export interface Segment {
+  id: string;
+  startTime: Date;
+  endTime: Date | null;
+  participantIds: string[];
+  label?: string;
+}
+
+export interface TranscriptEntry {
+  id: string;
+  speaker: Speaker;
+  participantId: string | null;
+  participantName: string | null;
+  original: string;
+  translated: string;
+  timestamp: Date;
+  segmentId: string;
+}
+
+export interface Session {
+  id: string;
+  startTime: Date;
+  entries: TranscriptEntry[];
+  participants: Participant[];
+  segments: Segment[];
+  currentSegmentId: string | null;
+  mode: Mode;
+}
+
+// ── Messages: Browser → Server ────────────────────────────────────────────
 
 export interface AudioChunkMessage {
   type: 'audio_chunk';
@@ -18,10 +60,32 @@ export interface ModeSwitchMessage {
   mode: Mode;
 }
 
-export interface SetLanguagesMessage {
-  type: 'set_languages';
-  lang1: Speaker;
-  lang2: Speaker;
+export interface StartSessionMessage {
+  type: 'start_session';
+  participants: Array<{ name: string; role: ParticipantRole; language: Speaker }>;
+}
+
+export interface AddParticipantMessage {
+  type: 'add_participant';
+  name: string;
+  role: ParticipantRole;
+  language: Speaker;
+}
+
+export interface RemoveParticipantMessage {
+  type: 'remove_participant';
+  participantId: string;
+}
+
+export interface RejoinParticipantMessage {
+  type: 'rejoin_participant';
+  participantId: string;
+}
+
+export interface AssignSpeakerMessage {
+  type: 'assign_speaker';
+  entryId: string;
+  participantId: string;
 }
 
 export interface RedoEntryMessage {
@@ -45,7 +109,11 @@ export type ClientMessage =
   | AudioChunkMessage
   | ManualCommitMessage
   | ModeSwitchMessage
-  | SetLanguagesMessage
+  | StartSessionMessage
+  | AddParticipantMessage
+  | RemoveParticipantMessage
+  | RejoinParticipantMessage
+  | AssignSpeakerMessage
   | RedoEntryMessage
   | DeleteEntryMessage
   | GenerateReportMessage;
@@ -63,9 +131,13 @@ export interface CommittedTranscriptMessage {
   entryId: string;
   text: string;
   language: Speaker;
+  participantId: string | null;
+  participantName: string | null;
+  confident: boolean;
   targetLanguage: Speaker | null;
   translated: string;
   timestamp: string;
+  segmentId: string;
 }
 
 export interface CorrectedTranscriptMessage {
@@ -73,6 +145,8 @@ export interface CorrectedTranscriptMessage {
   entryId: string;
   text: string;
   language: Speaker;
+  participantId: string | null;
+  participantName: string | null;
   targetLanguage: Speaker | null;
   translated: string;
 }
@@ -101,6 +175,19 @@ export interface ErrorMessage {
   text: string;
 }
 
+export interface ParticipantsUpdateMessage {
+  type: 'participants_update';
+  participants: Participant[];
+  segments: Segment[];
+  currentSegmentId: string | null;
+}
+
+export interface SegmentChangeMessage {
+  type: 'segment_change';
+  segment: Segment;
+  label: string;
+}
+
 export type ServerMessage =
   | PartialTranscriptMessage
   | CommittedTranscriptMessage
@@ -109,23 +196,6 @@ export type ServerMessage =
   | TtsEndMessage
   | ReportMessage
   | StatusMessage
-  | ErrorMessage;
-
-// ── Domain types ──────────────────────────────────────────────────────────
-
-export interface TranscriptEntry {
-  id: string;
-  speaker: Speaker;
-  original: string;
-  translated: string;
-  timestamp: Date;
-}
-
-export interface Session {
-  id: string;
-  startTime: Date;
-  entries: TranscriptEntry[];
-  mode: Mode;
-  lang1: Speaker;
-  lang2: Speaker;
-}
+  | ErrorMessage
+  | ParticipantsUpdateMessage
+  | SegmentChangeMessage;

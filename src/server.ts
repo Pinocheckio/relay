@@ -9,7 +9,16 @@ import { SttClient } from './stt.js';
 import { translate, detectSpeaker, isNonLatin, normalizeScript, convertToLanguage } from './translator.js';
 import { synthesize } from './tts.js';
 import { createSession, addEntry, updateEntry, makeEntryId, generateReport } from './session.js';
-import type { ClientMessage, Session, Speaker } from './types.js';
+import {
+  createParticipant,
+  addParticipant,
+  removeParticipant,
+  rejoinParticipant,
+  startNewSegment,
+  getActiveLangs,
+  resolveParticipant,
+} from './participants.js';
+import type { ClientMessage, Speaker } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -49,9 +58,8 @@ const wss = new WebSocketServer({ server });
 wss.on('connection', (clientWs: WebSocket) => {
   console.log('[relay] Client connected');
 
-  const session: Session = createSession('nl', 'fa');
+  const session = createSession();
   const stt = new SttClient(ELEVENLABS_API_KEY);
-  let ttsPlaying = false;
 
   function send(msg: object): void {
     if (clientWs.readyState === WebSocket.OPEN) clientWs.send(JSON.stringify(msg));
@@ -65,7 +73,7 @@ wss.on('connection', (clientWs: WebSocket) => {
     console.error('[stt] error', err.message);
     send({ type: 'error', text: `STT fout: ${err.message}` });
   });
-  // Track partials — language AND text, because Scribe sometimes re-transcribes differently on commit
+
   let lastPartialLang: Speaker | null = null;
   let lastPartialText = '';
 
@@ -80,58 +88,54 @@ wss.on('connection', (clientWs: WebSocket) => {
     let detected = detectSpeaker(languageCode);
     let text = committedText;
 
-    console.log(`[stt] committed lang=${languageCode}(${detected}) text="${text.slice(0,40)}" | partial lang=${lastPartialLang} text="${lastPartialText.slice(0,40)}"`);
+    console.log(`[stt] committed lang=${languageCode}(${detected}) text="${text.slice(0, 40)}" | partial lang=${lastPartialLang} text="${lastPartialText.slice(0, 40)}"`);
 
-    // Scribe sometimes re-transcribes the audio differently on commit than during streaming.
-    // When committed language disagrees with what the partials showed, trust BOTH the
-    // partial language AND the partial text (the committed text is in the wrong language).
+    // Partial-vs-committed correction: Scribe sometimes re-transcribes differently on commit
+    const activeLangs = getActiveLangs(session);
     if (lastPartialLang && lastPartialLang !== detected && lastPartialText) {
-      const partialInPair = lastPartialLang === session.lang1 || lastPartialLang === session.lang2;
+      const partialInPair = activeLangs.includes(lastPartialLang);
       if (partialInPair) {
         console.log(`[stt] Scribe re-transcribed on commit: reverting to partial text+lang`);
         detected = lastPartialLang;
-        text = lastPartialText; // use the partial text, not the committed re-transcription
+        text = lastPartialText;
       }
     }
 
     lastPartialLang = null;
     lastPartialText = '';
 
-    // Only process languages that are part of the selected pair
-    const sameLanguage = session.lang1 === session.lang2;
+    if (activeLangs.length === 0) {
+      console.log('[stt] No active participants, skipping committed utterance');
+      return;
+    }
+
     let detectedSpeaker: Speaker;
     let targetSpeaker: Speaker | null = null;
 
-    if (sameLanguage) {
-      detectedSpeaker = session.lang1;
-    } else if (detected === session.lang1) {
-      detectedSpeaker = session.lang1;
-      targetSpeaker = session.lang2;
-    } else if (detected === session.lang2) {
-      detectedSpeaker = session.lang2;
-      targetSpeaker = session.lang1;
+    if (activeLangs.length === 1) {
+      detectedSpeaker = activeLangs[0];
+    } else if (detected && activeLangs.includes(detected)) {
+      detectedSpeaker = detected;
+      const otherLangs = activeLangs.filter(l => l !== detected);
+      targetSpeaker = otherLangs[0] ?? null;
     } else {
-      // Scribe misidentified the language.
-      // If one side of the pair is non-Latin (FA, AR, etc.) and the other side is Latin,
-      // Latin languages are reliably detected — so if it's not the Latin side, it's the non-Latin side.
-      const lang1NonLatin = isNonLatin(session.lang1);
-      const lang2NonLatin = isNonLatin(session.lang2);
-      if (lang2NonLatin && !lang1NonLatin) {
-        console.log(`[stt] lang "${languageCode}" → assuming ${session.lang2} (non-Latin fallback)`);
-        detectedSpeaker = session.lang2;
-        targetSpeaker = session.lang1;
-      } else if (lang1NonLatin && !lang2NonLatin) {
-        console.log(`[stt] lang "${languageCode}" → assuming ${session.lang1} (non-Latin fallback)`);
-        detectedSpeaker = session.lang1;
-        targetSpeaker = session.lang2;
+      // Non-Latin fallback
+      const nonLatinLangs = activeLangs.filter(l => isNonLatin(l));
+      const latinLangs = activeLangs.filter(l => !isNonLatin(l));
+      if (nonLatinLangs.length > 0 && latinLangs.length > 0) {
+        console.log(`[stt] lang "${languageCode}" → assuming non-Latin fallback (${nonLatinLangs[0]})`);
+        detectedSpeaker = nonLatinLangs[0];
+        targetSpeaker = latinLangs[0];
       } else {
-        console.log(`[stt] lang "${languageCode}" not in pair ${session.lang1}-${session.lang2}, skipping`);
+        console.log(`[stt] lang "${languageCode}" not matched to any active participant, skipping`);
         return;
       }
     }
 
+    const { participant, confident } = resolveParticipant(session, detectedSpeaker);
+    const currentSegmentId = session.currentSegmentId ?? 'unknown';
+
     try {
-      // If the speaker uses a non-Latin script but Scribe returned romanized text, convert first
       const nativeText = await normalizeScript(text, detectedSpeaker);
       if (nativeText !== text) console.log(`[script] normalized "${text}" → "${nativeText}"`);
 
@@ -144,28 +148,38 @@ wss.on('connection', (clientWs: WebSocket) => {
         entryId,
         text: nativeText,
         language: detectedSpeaker,
+        participantId: participant?.id ?? null,
+        participantName: participant?.name ?? null,
+        confident,
         targetLanguage: targetSpeaker,
         translated,
         timestamp: new Date().toISOString(),
+        segmentId: currentSegmentId,
       });
 
-      addEntry(session, { id: entryId, speaker: detectedSpeaker, original: nativeText, translated, timestamp: new Date() });
+      addEntry(session, {
+        id: entryId,
+        speaker: detectedSpeaker,
+        participantId: participant?.id ?? null,
+        participantName: participant?.name ?? null,
+        original: nativeText,
+        translated,
+        timestamp: new Date(),
+        segmentId: currentSegmentId,
+      });
 
       if (targetSpeaker && translated) {
         const voiceId = VOICES[targetSpeaker] ?? VOICE_NL;
         console.log(`[tts] synthesizing to ${targetSpeaker} using voice ${voiceId}`);
-        ttsPlaying = true;
         let chunkCount = 0;
         await synthesize(translated, targetSpeaker, ELEVENLABS_API_KEY, voiceId, (chunk) => {
           chunkCount++;
           send({ type: 'tts_audio', data: chunk });
         });
-        ttsPlaying = false;
         console.log(`[tts] done — ${chunkCount} chunks sent`);
         send({ type: 'tts_end' });
       }
     } catch (err) {
-      ttsPlaying = false;
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error('[pipeline] error', errMsg);
       send({ type: 'error', text: `Pipeline fout: ${errMsg}` });
@@ -200,31 +214,98 @@ wss.on('connection', (clientWs: WebSocket) => {
         }
         break;
 
-      case 'set_languages':
-        session.lang1 = msg.lang1;
-        session.lang2 = msg.lang2;
-        if (msg.lang1 === msg.lang2) {
-          send({ type: 'status', text: `Alleen opname — geen vertaling (${msg.lang1.toUpperCase()})` });
-        } else {
-          send({ type: 'status', text: `Taalkeuze: ${msg.lang1.toUpperCase()} ↔ ${msg.lang2.toUpperCase()}` });
+      case 'start_session': {
+        for (const p of msg.participants) {
+          const participant = createParticipant(p.name, p.role, p.language);
+          session.participants.push(participant);
+        }
+        const firstSeg = startNewSegment(session);
+        send({
+          type: 'participants_update',
+          participants: session.participants,
+          segments: session.segments,
+          currentSegmentId: session.currentSegmentId,
+        });
+        console.log(`[session] started with ${session.participants.length} participants, segment: "${firstSeg.label}"`);
+        break;
+      }
+
+      case 'add_participant': {
+        const newParticipant = createParticipant(msg.name, msg.role, msg.language);
+        const addSeg = addParticipant(session, newParticipant);
+        send({
+          type: 'participants_update',
+          participants: session.participants,
+          segments: session.segments,
+          currentSegmentId: session.currentSegmentId,
+        });
+        send({ type: 'segment_change', segment: addSeg, label: `${newParticipant.name} is bij het gesprek gekomen` });
+        break;
+      }
+
+      case 'remove_participant': {
+        const leaving = session.participants.find(p => p.id === msg.participantId);
+        const leaveName = leaving?.name ?? 'Deelnemer';
+        const removeSeg = removeParticipant(session, msg.participantId);
+        send({
+          type: 'participants_update',
+          participants: session.participants,
+          segments: session.segments,
+          currentSegmentId: session.currentSegmentId,
+        });
+        send({ type: 'segment_change', segment: removeSeg, label: `${leaveName} heeft het gesprek verlaten` });
+        break;
+      }
+
+      case 'rejoin_participant': {
+        const rejoining = session.participants.find(p => p.id === msg.participantId);
+        const rejoinName = rejoining?.name ?? 'Deelnemer';
+        const rejoinSeg = rejoinParticipant(session, msg.participantId);
+        send({
+          type: 'participants_update',
+          participants: session.participants,
+          segments: session.segments,
+          currentSegmentId: session.currentSegmentId,
+        });
+        send({ type: 'segment_change', segment: rejoinSeg, label: `${rejoinName} is teruggekomen` });
+        break;
+      }
+
+      case 'assign_speaker': {
+        const entry = session.entries.find(e => e.id === msg.entryId);
+        const assignedParticipant = session.participants.find(p => p.id === msg.participantId);
+        if (entry && assignedParticipant) {
+          entry.participantId = assignedParticipant.id;
+          entry.participantName = assignedParticipant.name;
+          send({
+            type: 'corrected_transcript',
+            entryId: msg.entryId,
+            text: entry.original,
+            language: entry.speaker,
+            participantId: assignedParticipant.id,
+            participantName: assignedParticipant.name,
+            targetLanguage: null,
+            translated: entry.translated,
+          });
         }
         break;
+      }
 
       case 'redo_entry': {
         const { entryId, text, sourceLang, targetLang } = msg;
         try {
-          // Step 1: Convert stored text to the declared source language.
-          // Scribe may have mis-transcribed (e.g. Dutch speech → English text).
-          // convertToLanguage asks GPT to rewrite it in sourceLang if it isn't already.
           const sourceText = await convertToLanguage(text, sourceLang);
-          console.log(`[redo] converted "${text.slice(0,30)}" → "${sourceText.slice(0,30)}" (${sourceLang})`);
+          console.log(`[redo] converted "${text.slice(0, 30)}" → "${sourceText.slice(0, 30)}" (${sourceLang})`);
           const nativeText = await normalizeScript(sourceText, sourceLang);
           const translated = targetLang ? await translate(nativeText, sourceLang, targetLang) : '';
+          const redoEntry = session.entries.find(e => e.id === entryId);
           send({
             type: 'corrected_transcript',
             entryId,
-            text: nativeText,  // now in the correct source language
+            text: nativeText,
             language: sourceLang,
+            participantId: redoEntry?.participantId ?? null,
+            participantName: redoEntry?.participantName ?? null,
             targetLanguage: targetLang,
             translated,
           });
