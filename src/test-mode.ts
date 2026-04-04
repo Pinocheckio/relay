@@ -193,6 +193,12 @@ export class TestModePlayer extends EventEmitter {
       // Await the full pipeline (translate + TTS synthesis) so we don't advance
       // to the next line until this one's audio has been sent to the client.
       await this.onCommitText(line.text, line.language, line.speaker);
+
+      // The pipeline completes when TTS chunks are sent, but the client still
+      // needs time to play them. Estimate playback duration (~300ms/word at 1x).
+      const wordCount = line.text.split(/\s+/).length;
+      const playbackMs = (wordCount * 300 + 500) / this.speed;
+      await this.sleep(playbackMs);
     } else {
       // Fallback: fire-and-forget with simulated pacing
       this.emit('committed', line.text, line.language, null);
