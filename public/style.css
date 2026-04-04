@@ -161,6 +161,7 @@
 }
 
 .p-select:focus { border-color: var(--accent); }
+.p-select-lang { min-width: 110px; }
 
 .p-add-btn {
   padding: 0.55rem 1rem;
