@@ -205,7 +205,8 @@ const reportPanel       = document.getElementById('report-panel');
 const reportContent     = document.getElementById('report-content');
 const copyReportBtn     = document.getElementById('btn-copy-report');
 const ttsIndicator      = document.getElementById('tts-indicator');
-const disconnectBtn     = document.getElementById('btn-disconnect');
+const disconnectBtn        = document.getElementById('btn-disconnect');
+const newConversationBtn   = document.getElementById('btn-new-conversation');
 const participantPanel  = document.getElementById('participant-panel');
 const participantChipsEl= document.getElementById('participant-chips');
 const btnAddMid         = document.getElementById('btn-add-mid');
@@ -325,15 +326,49 @@ function sendWs(msg) {
 
 function startConversation() {
   participantPanel.classList.remove('hidden');
-  // Clear placeholder
+  newConversationBtn.classList.remove('hidden');
+  disconnectBtn.classList.remove('hidden');
   transcriptEl.innerHTML = '';
+  reportPanel.classList.add('hidden');
+  reportContent.innerHTML = '';
 
   connectWs(() => {
-    // Send all onboarding participants + start session in one message
     sendWs({ type: 'start_session', participants: onboardingParticipants });
-    // Start recording
     startRecording();
   });
+}
+
+function resetConversation() {
+  // Tear down current session
+  disconnectWs();
+  levelFill.style.width = '0%';
+  levelStatus.textContent = '';
+
+  // Reset state
+  participants = [];
+  onboardingParticipants = [];
+  entryElements.clear();
+
+  // Reset UI
+  transcriptEl.innerHTML = '<p class="transcript-placeholder">Klik op <strong>Verbinden</strong> om het gesprek te starten.</p>';
+  partialEl.textContent = '';
+  participantChipsEl.innerHTML = '';
+  participantPanel.classList.add('hidden');
+  midSessionForm.classList.add('hidden');
+  reportPanel.classList.add('hidden');
+  reportContent.innerHTML = '';
+  newConversationBtn.classList.add('hidden');
+  disconnectBtn.classList.add('hidden');
+  setStatus('Niet verbonden');
+  langEl.textContent = '—';
+
+  // Reset onboarding form
+  pNameInput.value = '';
+  renderOnboardingList();
+  updateStartButton();
+
+  // Show onboarding again
+  onboardingOverlay.classList.remove('hidden');
 }
 
 disconnectBtn.addEventListener('click', () => {
@@ -341,6 +376,8 @@ disconnectBtn.addEventListener('click', () => {
   levelFill.style.width = '0%';
   levelStatus.textContent = '';
 });
+
+newConversationBtn.addEventListener('click', resetConversation);
 
 // ── Server message handler ────────────────────────────────────────────────
 

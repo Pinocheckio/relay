@@ -371,6 +371,23 @@ html, body {
   color: #fff;
 }
 
+/* ── New conversation button ─────────────────────────────────────────── */
+
+.btn-new-conversation {
+  padding: 0.35rem 1rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  background: transparent;
+  color: #9ca3af;
+  border: 1px solid #374151;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.btn-new-conversation:hover { background: #1f2937; color: #fff; border-color: #6b7280; }
+.btn-new-conversation.hidden { display: none; }
+
 /* ── Disconnect button ───────────────────────────────────────────────── */
 
 .btn-disconnect {
