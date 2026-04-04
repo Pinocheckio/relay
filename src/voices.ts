@@ -13,16 +13,16 @@ interface VoicePair {
 
 const VOICE_REGISTRY: Record<string, VoicePair> = {
   nl: {
-    female: 'TODO_NL_FEMALE',               // TODO: pick from ElevenLabs (e.g. Ruth)
-    male:   'nPczCjzI2devNBz1zQrb',         // Brian
+    female: 'ANHrhmaFeVN0QJaa0PhL',          // Petra Vlaams — professional Flemish female
+    male:   'nPczCjzI2devNBz1zQrb',          // Brian
   },
   en: {
-    female: 'EXAVITQu4vr4xnSDxMaL',         // Bella
-    male:   'TxGEqnHWrfWFTfGW9XjX',         // Josh
+    female: 'EXAVITQu4vr4xnSDxMaL',          // Sarah — mature, reassuring, confident
+    male:   'TxGEqnHWrfWFTfGW9XjX',          // Josh
   },
   fa: {
-    female: 'TODO_FA_FEMALE',               // TODO: pick Farsi-native female voice
-    male:   'TODO_FA_MALE',                 // TODO: pick Farsi-native male voice
+    female: '21m00Tcm4TlvDq8ikWAM',          // Rachel — calm, young (via eleven_v3)
+    male:   'ErXwobaYiN019PkySvjV',          // Antoni — young, well-rounded (via eleven_v3)
   },
 };
 
