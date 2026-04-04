@@ -6,7 +6,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 import { SttClient } from './stt.js';
-import { translate, detectSpeaker, isNonLatin, normalizeScript, convertToLanguage } from './translator.js';
+import { TestModePlayer } from './test-mode.js';
+import { translate, detectSpeaker, detectTextLanguage, isNonLatin, normalizeScript, convertToLanguage } from './translator.js';
 import { synthesize } from './tts.js';
 import { createSession, addEntry, updateEntry, makeEntryId, generateReport } from './session.js';
 import {
@@ -18,20 +19,22 @@ import {
   getActiveLangs,
   resolveParticipant,
 } from './participants.js';
-import type { ClientMessage, Speaker } from './types.js';
+import type { ClientMessage, Speaker, Participant } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+const DEEPGRAM_API_KEY  = process.env.DEEPGRAM_API_KEY ?? '';
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY ?? '';
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? '';
+const OPENAI_API_KEY    = process.env.OPENAI_API_KEY ?? '';
 const VOICE_NL = process.env.ELEVENLABS_VOICE_NL ?? 'nPczCjzI2devNBz1zQrb';
 const VOICE_FA = process.env.ELEVENLABS_VOICE_FA ?? '9BWtsMINqrJLrRacOk9x';
-const VOICE_EN = process.env.ELEVENLABS_VOICE_EN ?? 'nPczCjzI2devNBz1zQrb';
+const VOICE_EN = process.env.ELEVENLABS_VOICE_EN ?? 'TxGEqnHWrfWFTfGW9XjX';
 const VOICES: Record<string, string> = { nl: VOICE_NL, fa: VOICE_FA, en: VOICE_EN };
 const PORT = Number(process.env.PORT ?? 3000);
 
+if (!DEEPGRAM_API_KEY)   throw new Error('DEEPGRAM_API_KEY is not set');
 if (!ELEVENLABS_API_KEY) throw new Error('ELEVENLABS_API_KEY is not set');
-if (!OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is not set');
+if (!OPENAI_API_KEY)     throw new Error('OPENAI_API_KEY is not set');
 
 // ── Express app ───────────────────────────────────────────────────────────
 
@@ -59,101 +62,140 @@ wss.on('connection', (clientWs: WebSocket) => {
   console.log('[relay] Client connected');
 
   const session = createSession();
-  const stt = new SttClient(ELEVENLABS_API_KEY);
+
+  // STT is created lazily on start_session or start_test_mode (audio)
+  let stt: SttClient | null = null;
+  let testPlayer: TestModePlayer | null = null;
+  let isTestMode = false;
+  let testTtsEnabled = true;
+
+  // Phase 3: diarization speaker index -> participant id mapping
+  const speakerMap = new Map<number, string>();
 
   function send(msg: object): void {
     if (clientWs.readyState === WebSocket.OPEN) clientWs.send(JSON.stringify(msg));
   }
 
-  // ── STT event handlers ──────────────────────────────────────────────────
+  // ── STT event wiring ───────────────────────────────────────────────────
 
-  stt.on('connected', () => send({ type: 'status', text: 'Verbonden — klaar om te luisteren.' }));
-  stt.on('disconnected', () => send({ type: 'status', text: 'Verbinding verbroken. Opnieuw verbinden...' }));
-  stt.on('error', (err: Error) => {
-    console.error('[stt] error', err.message);
-    send({ type: 'error', text: `STT fout: ${err.message}` });
-  });
+  function wireUpSttEvents(sttClient: SttClient): void {
+    sttClient.on('connected', () => send({ type: 'status', text: 'Verbonden — klaar om te luisteren.' }));
+    sttClient.on('disconnected', () => send({ type: 'status', text: 'Verbinding verbroken. Opnieuw verbinden...' }));
+    sttClient.on('error', (err: Error) => {
+      console.error('[stt] error', err.message);
+      send({ type: 'error', text: `STT fout: ${err.message}` });
+    });
 
-  let lastPartialLang: Speaker | null = null;
-  let lastPartialText = '';
+    sttClient.on('partial', (text: string, language: string) => {
+      let partialDetected = detectSpeaker(language);
 
-  stt.on('partial', (text: string, language: string) => {
-    const partialDetected = detectSpeaker(language);
-    if (partialDetected) lastPartialLang = partialDetected;
-    if (text) lastPartialText = text;
-
-    // Suppress partials from languages outside the active participant set.
-    // Non-Latin fallback: if one side is non-Latin and detected code is unrecognised,
-    // still allow through (mirrors the committed handler heuristic).
-    const activeLangs = getActiveLangs(session);
-    if (activeLangs.length > 0) {
-      const matchesPair = partialDetected && activeLangs.includes(partialDetected);
-      const nonLatinFallback = !matchesPair
-        && activeLangs.some(l => isNonLatin(l))
-        && activeLangs.some(l => !isNonLatin(l));
-      if (!matchesPair && !nonLatinFallback) {
-        send({ type: 'partial_transcript', text: '', language });
-        return;
+      const activeLangs = getActiveLangs(session);
+      if (activeLangs.length > 1 && text.split(/\s+/).length >= 3) {
+        const textLang = detectTextLanguage(text, activeLangs);
+        if (textLang && textLang !== partialDetected) {
+          partialDetected = textLang;
+        }
       }
-    }
 
-    send({ type: 'partial_transcript', text, language });
-  });
-
-  stt.on('committed', async (committedText: string, languageCode: string) => {
-    let detected = detectSpeaker(languageCode);
-    let text = committedText;
-
-    console.log(`[stt] committed lang=${languageCode}(${detected}) text="${text.slice(0, 40)}" | partial lang=${lastPartialLang} text="${lastPartialText.slice(0, 40)}"`);
-
-    // Partial-vs-committed correction: Scribe sometimes re-transcribes differently on commit
-    const activeLangs = getActiveLangs(session);
-    if (lastPartialLang && lastPartialLang !== detected && lastPartialText) {
-      const partialInPair = activeLangs.includes(lastPartialLang);
-      if (partialInPair) {
-        console.log(`[stt] Scribe re-transcribed on commit: reverting to partial text+lang`);
-        detected = lastPartialLang;
-        text = lastPartialText;
+      // Suppress partials for languages not in the active participant set
+      if (activeLangs.length > 0 && partialDetected && !activeLangs.includes(partialDetected)) {
+        const nonLatinFallback = activeLangs.some(l => isNonLatin(l)) && activeLangs.some(l => !isNonLatin(l));
+        if (!nonLatinFallback) {
+          send({ type: 'partial_transcript', text: '', language });
+          return;
+        }
       }
-    }
 
-    lastPartialLang = null;
-    lastPartialText = '';
+      send({ type: 'partial_transcript', text, language: partialDetected ?? language });
+    });
 
+    sttClient.on('committed', async (text: string, languageCode: string, speakerIndex: number | null) => {
+      await handleCommitted(text, languageCode, speakerIndex);
+    });
+  }
+
+  // ── Core pipeline: STT committed -> translate -> TTS -> send ──────────
+
+  async function handleCommitted(
+    committedText: string,
+    languageCode: string,
+    speakerIndex: number | null,
+  ): Promise<void> {
+    const text = committedText;
+    if (!text.trim()) return;
+
+    const activeLangs = getActiveLangs(session);
     if (activeLangs.length === 0) {
       console.log('[stt] No active participants, skipping committed utterance');
       return;
     }
 
-    let detectedSpeaker: Speaker;
-    let targetSpeaker: Speaker | null = null;
-
-    if (activeLangs.length === 1) {
-      detectedSpeaker = activeLangs[0];
-    } else if (detected && activeLangs.includes(detected)) {
-      detectedSpeaker = detected;
-      const otherLangs = activeLangs.filter(l => l !== detected);
-      targetSpeaker = otherLangs[0] ?? null;
-    } else {
-      // Non-Latin fallback
-      const nonLatinLangs = activeLangs.filter(l => isNonLatin(l));
-      const latinLangs = activeLangs.filter(l => !isNonLatin(l));
-      if (nonLatinLangs.length > 0 && latinLangs.length > 0) {
-        console.log(`[stt] lang "${languageCode}" → assuming non-Latin fallback (${nonLatinLangs[0]})`);
-        detectedSpeaker = nonLatinLangs[0];
-        targetSpeaker = latinLangs[0];
-      } else {
-        console.log(`[stt] lang "${languageCode}" not matched to any active participant, skipping`);
-        return;
+    // Text-based language override: Deepgram language detection can confuse NL/EN
+    let detected = detectSpeaker(languageCode);
+    if (activeLangs.length > 1) {
+      const textLang = detectTextLanguage(text, activeLangs);
+      if (textLang && textLang !== detected) {
+        console.log(`[stt] Text override: Deepgram="${detected}" -> text="${textLang}" for "${text.slice(0, 50)}"`);
+        detected = textLang;
       }
     }
 
-    const { participant, confident } = resolveParticipant(session, detectedSpeaker);
+    // Speaker resolution: diarization first (Phase 3), then language-based fallback
+    let detectedSpeaker: Speaker = activeLangs[0]; // safe default, will be overwritten
+    let targetSpeaker: Speaker | null = null;
+    let participant: Participant | null = null;
+    let confident = false;
+    let resolvedByDiarize = false;
+
+    if (speakerIndex !== null && speakerMap.has(speakerIndex)) {
+      const mappedId = speakerMap.get(speakerIndex)!;
+      const mappedP = session.participants.find(p => p.id === mappedId && p.isPresent);
+      if (mappedP) {
+        detectedSpeaker = mappedP.language as Speaker;
+        participant = mappedP;
+        confident = true;
+        const others = activeLangs.filter(l => l !== detectedSpeaker);
+        targetSpeaker = others[0] ?? null;
+        resolvedByDiarize = true;
+        console.log(`[stt] diarize: speaker ${speakerIndex} -> ${mappedP.name} (${detectedSpeaker})`);
+      }
+    }
+
+    if (!resolvedByDiarize) {
+      if (activeLangs.length === 1) {
+        detectedSpeaker = activeLangs[0];
+      } else if (detected && activeLangs.includes(detected)) {
+        detectedSpeaker = detected;
+        const others = activeLangs.filter(l => l !== detected);
+        targetSpeaker = others[0] ?? null;
+      } else {
+        const nonLatin = activeLangs.filter(l => isNonLatin(l));
+        const latin = activeLangs.filter(l => !isNonLatin(l));
+        if (nonLatin.length > 0 && latin.length > 0) {
+          console.log(`[stt] lang "${languageCode}" -> non-Latin fallback (${nonLatin[0]})`);
+          detectedSpeaker = nonLatin[0];
+          targetSpeaker = latin[0];
+        } else {
+          console.log(`[stt] lang "${languageCode}" unmatched, skipping`);
+          return;
+        }
+      }
+      const res = resolveParticipant(session, detectedSpeaker);
+      participant = res.participant;
+      confident = res.confident;
+
+      // Learn: confident language match + new speaker index -> save mapping
+      if (confident && speakerIndex !== null && !speakerMap.has(speakerIndex) && participant) {
+        speakerMap.set(speakerIndex, participant.id);
+        console.log(`[diarize] Learned: speaker ${speakerIndex} = ${participant.name}`);
+      }
+    }
+
     const currentSegmentId = session.currentSegmentId ?? 'unknown';
 
     try {
       const nativeText = await normalizeScript(text, detectedSpeaker);
-      if (nativeText !== text) console.log(`[script] normalized "${text}" → "${nativeText}"`);
+      if (nativeText !== text) console.log(`[script] normalized "${text}" -> "${nativeText}"`);
 
       const translated = targetSpeaker ? await translate(nativeText, detectedSpeaker, targetSpeaker) : '';
       if (targetSpeaker) console.log(`[translate] [${detectedSpeaker}->${targetSpeaker}]: ${translated}`);
@@ -171,6 +213,7 @@ wss.on('connection', (clientWs: WebSocket) => {
         translated,
         timestamp: new Date().toISOString(),
         segmentId: currentSegmentId,
+        speakerIndex,
       });
 
       addEntry(session, {
@@ -182,9 +225,11 @@ wss.on('connection', (clientWs: WebSocket) => {
         translated,
         timestamp: new Date(),
         segmentId: currentSegmentId,
+        speakerIndex,
       });
 
-      if (targetSpeaker && translated) {
+      const shouldTts = !isTestMode || testTtsEnabled;
+      if (targetSpeaker && translated && shouldTts) {
         const voiceId = VOICES[targetSpeaker] ?? VOICE_NL;
         console.log(`[tts] synthesizing to ${targetSpeaker} using voice ${voiceId}`);
         let chunkCount = 0;
@@ -200,40 +245,19 @@ wss.on('connection', (clientWs: WebSocket) => {
       console.error('[pipeline] error', errMsg);
       send({ type: 'error', text: `Pipeline fout: ${errMsg}` });
     }
-  });
+  }
 
-  // ── Start STT ──────────────────────────────────────────────────────────
-
-  stt.connect(session.mode);
-  send({ type: 'status', text: 'Verbinden met spraakherkenning...' });
-
-  // ── Client message handler ──────────────────────────────────────────────
+  // ── Client message handler ─────────────────────────────────────────────
 
   clientWs.on('message', async (raw: WebSocket.RawData) => {
     let msg: ClientMessage;
     try { msg = JSON.parse(raw.toString()) as ClientMessage; } catch { return; }
 
     switch (msg.type) {
-      case 'audio_chunk':
-        stt.sendChunk(msg.data);
-        break;
-
-      case 'manual_commit':
-        stt.commitManual();
-        break;
-
-      case 'mode_switch':
-        if (msg.mode !== session.mode) {
-          session.mode = msg.mode;
-          stt.switchMode(msg.mode);
-          send({ type: 'status', text: msg.mode === 'auto' ? 'Auto-modus actief.' : 'Handmatige modus actief.' });
-        }
-        break;
 
       case 'start_session': {
         for (const p of msg.participants) {
-          const participant = createParticipant(p.name, p.role, p.language);
-          session.participants.push(participant);
+          session.participants.push(createParticipant(p.name, p.role, p.language));
         }
         const firstSeg = startNewSegment(session);
         send({
@@ -243,8 +267,91 @@ wss.on('connection', (clientWs: WebSocket) => {
           currentSegmentId: session.currentSegmentId,
         });
         console.log(`[session] started with ${session.participants.length} participants, segment: "${firstSeg.label}"`);
+        // Connect Deepgram STT now that we have participants
+        stt = new SttClient(DEEPGRAM_API_KEY);
+        wireUpSttEvents(stt);
+        stt.connect(session.mode);
+        send({ type: 'status', text: 'Verbinden met spraakherkenning...' });
         break;
       }
+
+      case 'start_test_mode': {
+        isTestMode = true;
+        testTtsEnabled = msg.ttsPlayback;
+
+        // Set up session participants from script definition
+        for (const p of msg.script.participants) {
+          session.participants.push(createParticipant(p.name, p.role as import('./types.js').ParticipantRole, p.language));
+        }
+        startNewSegment(session);
+
+        // In audio mode, connect Deepgram to receive generated PCM audio
+        if (msg.mode === 'audio') {
+          stt = new SttClient(DEEPGRAM_API_KEY);
+          wireUpSttEvents(stt);
+          stt.connect(session.mode);
+        }
+
+        testPlayer = new TestModePlayer({
+          script: msg.script,
+          session,
+          mode: msg.mode,
+          apiKey: ELEVENLABS_API_KEY,
+          stt: msg.mode === 'audio' ? (stt ?? undefined) : undefined,
+          synthesizeFn: synthesize,
+          sendFn: send,
+        });
+
+        // In text mode, player emits 'committed' — wire it to handleCommitted
+        if (msg.mode === 'text') {
+          testPlayer.on('committed', async (text: string, lang: string, si: number | null) => {
+            await handleCommitted(text, lang, si);
+          });
+        }
+
+        send({
+          type: 'participants_update',
+          participants: session.participants,
+          segments: session.segments,
+          currentSegmentId: session.currentSegmentId,
+        });
+        send({ type: 'test_ready', lineCount: msg.script.lines.length, title: msg.script.title });
+        break;
+      }
+
+      case 'test_control': {
+        if (!testPlayer) break;
+        switch (msg.action) {
+          case 'play':  testPlayer.play(); break;
+          case 'pause': testPlayer.pause(); break;
+          case 'step':  testPlayer.step(); break;
+          case 'reset': testPlayer.reset(); break;
+          case 'speed':
+            if (msg.speed !== undefined) testPlayer.setSpeed(msg.speed);
+            break;
+          case 'tts_toggle':
+            testTtsEnabled = msg.ttsEnabled ?? true;
+            break;
+        }
+        break;
+      }
+
+      case 'audio_chunk':
+        // In test mode, audio is generated by the player — ignore mic chunks
+        if (!isTestMode && stt) stt.sendChunk(Buffer.from(msg.data, 'base64'));
+        break;
+
+      case 'manual_commit':
+        if (stt) stt.commitManual();
+        break;
+
+      case 'mode_switch':
+        if (msg.mode !== session.mode) {
+          session.mode = msg.mode;
+          if (stt) stt.switchMode(msg.mode);
+          send({ type: 'status', text: msg.mode === 'auto' ? 'Auto-modus actief.' : 'Handmatige modus actief.' });
+        }
+        break;
 
       case 'add_participant': {
         const newParticipant = createParticipant(msg.name, msg.role, msg.language);
@@ -293,6 +400,13 @@ wss.on('connection', (clientWs: WebSocket) => {
         if (entry && assignedParticipant) {
           entry.participantId = assignedParticipant.id;
           entry.participantName = assignedParticipant.name;
+
+          // Phase 3: update diarization map so future utterances auto-correct
+          if (entry.speakerIndex !== undefined && entry.speakerIndex !== null) {
+            speakerMap.set(entry.speakerIndex, msg.participantId);
+            console.log(`[diarize] Corrected: speaker ${entry.speakerIndex} = ${assignedParticipant.name}`);
+          }
+
           send({
             type: 'corrected_transcript',
             entryId: msg.entryId,
@@ -311,7 +425,7 @@ wss.on('connection', (clientWs: WebSocket) => {
         const { entryId, text, sourceLang, targetLang } = msg;
         try {
           const sourceText = await convertToLanguage(text, sourceLang);
-          console.log(`[redo] converted "${text.slice(0, 30)}" → "${sourceText.slice(0, 30)}" (${sourceLang})`);
+          console.log(`[redo] converted "${text.slice(0, 30)}" -> "${sourceText.slice(0, 30)}" (${sourceLang})`);
           const nativeText = await normalizeScript(sourceText, sourceLang);
           const translated = targetLang ? await translate(nativeText, sourceLang, targetLang) : '';
           const redoEntry = session.entries.find(e => e.id === entryId);
@@ -358,8 +472,17 @@ wss.on('connection', (clientWs: WebSocket) => {
     }
   });
 
-  clientWs.on('close', () => { console.log('[relay] Client disconnected'); stt.disconnect(); });
-  clientWs.on('error', (err: Error) => { console.error('[ws] client error', err.message); stt.disconnect(); });
+  clientWs.on('close', () => {
+    console.log('[relay] Client disconnected');
+    testPlayer?.pause();
+    stt?.disconnect();
+  });
+
+  clientWs.on('error', (err: Error) => {
+    console.error('[ws] client error', err.message);
+    testPlayer?.pause();
+    stt?.disconnect();
+  });
 });
 
 server.listen(PORT, () => console.log(`[relay] Running on http://localhost:${PORT}`));

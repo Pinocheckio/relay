@@ -1,6 +1,6 @@
 /**
  * Relay — client-side audio capture, WebSocket relay, TTS playback, UI logic.
- * v2: Participant management, onboarding, context windows, segment-aware report.
+ * v3: Deepgram STT migration + test mode (audio + text tiers).
  */
 
 // ── Participant color palette (8 care-friendly colors) ────────────────────
@@ -102,6 +102,9 @@ const pLangSelect               = document.getElementById('p-lang');
 const onboardingParticipantList = document.getElementById('onboarding-participant-list');
 const onboardingHint            = document.getElementById('onboarding-hint');
 const btnStartSession           = document.getElementById('btn-start-session');
+const normalSetup               = document.getElementById('normal-setup');
+const testSetup                 = document.getElementById('test-setup');
+const btnTestToggle             = document.getElementById('btn-test-toggle');
 
 let onboardingParticipants = []; // Array of {name, role, language}
 
@@ -162,6 +165,103 @@ btnStartSession.addEventListener('click', () => {
   startConversation();
 });
 
+// ── Test mode onboarding ──────────────────────────────────────────────────
+
+let isTestMode = false;
+let testScript = null;
+let testModeType = 'text'; // 'audio' | 'text'
+let testTtsPlayback = true;
+
+const testParticipantList  = document.getElementById('test-participant-list');
+const testScriptTitle      = document.getElementById('test-script-title');
+const btnStartTest         = document.getElementById('btn-start-test');
+const btnLoadExample       = document.getElementById('btn-load-example');
+const testDropZone         = document.getElementById('test-drop-zone');
+const testFileInput        = document.getElementById('test-file-input');
+const btnTestModeText      = document.getElementById('btn-test-mode-text');
+const btnTestModeAudio     = document.getElementById('btn-test-mode-audio');
+const btnTestTts           = document.getElementById('btn-test-tts');
+
+btnTestToggle.addEventListener('click', () => {
+  isTestMode = !isTestMode;
+  btnTestToggle.classList.toggle('active', isTestMode);
+  normalSetup.classList.toggle('hidden', isTestMode);
+  testSetup.classList.toggle('hidden', !isTestMode);
+});
+
+[btnTestModeText, btnTestModeAudio].forEach(btn => {
+  btn.addEventListener('click', () => {
+    testModeType = btn.dataset.mode;
+    btnTestModeText.classList.toggle('active', testModeType === 'text');
+    btnTestModeAudio.classList.toggle('active', testModeType === 'audio');
+  });
+});
+
+btnTestTts.addEventListener('click', () => {
+  testTtsPlayback = !testTtsPlayback;
+  btnTestTts.textContent = testTtsPlayback ? 'aan' : 'uit';
+  btnTestTts.classList.toggle('active', testTtsPlayback);
+});
+
+function loadTestScript(data) {
+  try {
+    testScript = typeof data === 'string' ? JSON.parse(data) : data;
+  } catch {
+    alert('Ongeldig JSON bestand.');
+    return;
+  }
+  testScriptTitle.textContent = `"${testScript.title}" — ${testScript.lines.length} regels`;
+  renderTestParticipantList(testScript.participants);
+  btnStartTest.disabled = false;
+}
+
+function renderTestParticipantList(participants) {
+  testParticipantList.innerHTML = '';
+  participants.forEach((p, i) => {
+    const color = getParticipantColor(i);
+    const row = document.createElement('div');
+    row.className = 'onboarding-participant-row';
+    row.innerHTML = `
+      <span class="onboarding-participant-dot" style="background:${color.accent}"></span>
+      <span class="onboarding-participant-name">${escapeHtml(p.name)}</span>
+      <span class="onboarding-participant-meta">${escapeHtml(ROLE_LABELS[p.role] ?? p.role)} · ${getLangLabel(p.language)}</span>
+    `;
+    testParticipantList.appendChild(row);
+  });
+}
+
+btnLoadExample.addEventListener('click', () => {
+  fetch('/test-scripts/intake-benhaddou.json')
+    .then(r => r.json())
+    .then(data => loadTestScript(data))
+    .catch(() => alert('Voorbeeld kon niet worden geladen.'));
+});
+
+testDropZone.addEventListener('click', () => testFileInput.click());
+testDropZone.addEventListener('dragover', (e) => { e.preventDefault(); testDropZone.classList.add('dragover'); });
+testDropZone.addEventListener('dragleave', () => testDropZone.classList.remove('dragover'));
+testDropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  testDropZone.classList.remove('dragover');
+  const file = e.dataTransfer?.files[0];
+  if (file) readTestFile(file);
+});
+testFileInput.addEventListener('change', () => {
+  if (testFileInput.files[0]) readTestFile(testFileInput.files[0]);
+});
+
+function readTestFile(file) {
+  const reader = new FileReader();
+  reader.onload = (e) => loadTestScript(e.target.result);
+  reader.readAsText(file);
+}
+
+btnStartTest.addEventListener('click', () => {
+  if (!testScript) return;
+  onboardingOverlay.classList.add('hidden');
+  startTestSession();
+});
+
 // ── State ─────────────────────────────────────────────────────────────────
 
 let ws            = null;
@@ -172,6 +272,7 @@ let sourceNode    = null;
 let currentMode   = 'auto';
 let isRecording   = false;
 let activePttSpeaker = null;
+let isActiveTestMode = false; // true during a live test session
 
 // Server-synced participant state
 let participants = []; // full Participant[] from server
@@ -181,45 +282,56 @@ const ttsChunks = [];
 const AUDIO_QUEUE = [];
 let audioQueueRunning = false;
 
-// Map of entryId → DOM element for in-place updates
+// Map of entryId -> DOM element for in-place updates
 const entryElements = new Map();
 
 // ── DOM refs ──────────────────────────────────────────────────────────────
 
-const transcriptEl      = document.getElementById('transcript');
-const partialEl         = document.getElementById('partial-text');
-const statusEl          = document.getElementById('status-text');
-const langEl            = document.getElementById('lang-detected');
-const modeAutoBtn       = document.getElementById('btn-mode-auto');
-const modeManuBtn       = document.getElementById('btn-mode-manual');
-const pttABtn           = document.getElementById('btn-ptt-a');
-const pttBBtn           = document.getElementById('btn-ptt-b');
-const pttALabel         = document.getElementById('ptt-a-label');
-const pttBLabel         = document.getElementById('ptt-b-label');
-const pttControls       = document.getElementById('ptt-controls');
-const generateReportBtn = document.getElementById('btn-generate-report');
-const correctionPopover = document.getElementById('correction-popover');
+const transcriptEl          = document.getElementById('transcript');
+const partialEl             = document.getElementById('partial-text');
+const statusEl              = document.getElementById('status-text');
+const langEl                = document.getElementById('lang-detected');
+const modeAutoBtn           = document.getElementById('btn-mode-auto');
+const modeManuBtn           = document.getElementById('btn-mode-manual');
+const pttABtn               = document.getElementById('btn-ptt-a');
+const pttBBtn               = document.getElementById('btn-ptt-b');
+const pttALabel             = document.getElementById('ptt-a-label');
+const pttBLabel             = document.getElementById('ptt-b-label');
+const pttControls           = document.getElementById('ptt-controls');
+const generateReportBtn     = document.getElementById('btn-generate-report');
+const correctionPopover     = document.getElementById('correction-popover');
 const correctionParticipantBtns = document.getElementById('correction-participant-btns');
-const correctionLangBtns = document.getElementById('correction-lang-btns');
-const reportPanel       = document.getElementById('report-panel');
-const reportContent     = document.getElementById('report-content');
-const copyReportBtn     = document.getElementById('btn-copy-report');
-const ttsIndicator      = document.getElementById('tts-indicator');
-const disconnectBtn        = document.getElementById('btn-disconnect');
-const newConversationBtn   = document.getElementById('btn-new-conversation');
-const participantPanel  = document.getElementById('participant-panel');
-const participantChipsEl= document.getElementById('participant-chips');
-const btnAddMid         = document.getElementById('btn-add-mid');
-const midSessionForm    = document.getElementById('mid-session-form');
-const midParticipantForm= document.getElementById('mid-participant-form');
-const midPNameInput     = document.getElementById('mid-p-name');
-const midPRoleSelect    = document.getElementById('mid-p-role');
-const midPLangSelect    = document.getElementById('mid-p-lang');
-const btnCancelMid      = document.getElementById('btn-cancel-mid');
-const levelFill         = document.getElementById('level-fill');
-const levelStatus       = document.getElementById('level-status');
+const correctionLangBtns    = document.getElementById('correction-lang-btns');
+const reportPanel           = document.getElementById('report-panel');
+const reportContent         = document.getElementById('report-content');
+const copyReportBtn         = document.getElementById('btn-copy-report');
+const ttsIndicator          = document.getElementById('tts-indicator');
+const disconnectBtn         = document.getElementById('btn-disconnect');
+const newConversationBtn    = document.getElementById('btn-new-conversation');
+const participantPanel      = document.getElementById('participant-panel');
+const participantChipsEl    = document.getElementById('participant-chips');
+const btnAddMid             = document.getElementById('btn-add-mid');
+const midSessionForm        = document.getElementById('mid-session-form');
+const midParticipantForm    = document.getElementById('mid-participant-form');
+const midPNameInput         = document.getElementById('mid-p-name');
+const midPRoleSelect        = document.getElementById('mid-p-role');
+const midPLangSelect        = document.getElementById('mid-p-lang');
+const btnCancelMid          = document.getElementById('btn-cancel-mid');
+const levelFill             = document.getElementById('level-fill');
+const levelStatus           = document.getElementById('level-status');
+const testControlBar        = document.getElementById('test-control-bar');
+const btnTestReset          = document.getElementById('btn-test-reset');
+const btnTestPlay           = document.getElementById('btn-test-play');
+const btnTestStep           = document.getElementById('btn-test-step');
+const testProgressText      = document.getElementById('test-progress-text');
+const testProgressFill      = document.getElementById('test-progress-fill');
+const testCurrentLine       = document.getElementById('test-current-line');
+const btnTestTtsLive        = document.getElementById('btn-test-tts-live');
+const testAccuracyPanel     = document.getElementById('test-accuracy-panel');
+const testAccuracyContent   = document.getElementById('test-accuracy-content');
 
 let lastLevelUpdate = 0;
+let isTestPlaying = false;
 
 // ── Participant helpers ───────────────────────────────────────────────────
 
@@ -233,7 +345,6 @@ function getBubbleAlignment(participantId, language) {
     const p = participants.find(p => p.id === participantId);
     if (p) return p.role === 'care_worker' ? 'left' : 'right';
   }
-  // Language-based fallback: if any care_worker speaks this language, put left
   const careWorkerLangs = participants.filter(p => p.role === 'care_worker').map(p => p.language);
   return careWorkerLangs.includes(language) ? 'left' : 'right';
 }
@@ -322,15 +433,18 @@ function sendWs(msg) {
   }
 }
 
-// ── Conversation start ────────────────────────────────────────────────────
+// ── Conversation start (normal mode) ──────────────────────────────────────
 
 function startConversation() {
+  isActiveTestMode = false;
   participantPanel.classList.remove('hidden');
   newConversationBtn.classList.remove('hidden');
   disconnectBtn.classList.remove('hidden');
   transcriptEl.innerHTML = '';
   reportPanel.classList.add('hidden');
   reportContent.innerHTML = '';
+  testControlBar.classList.add('hidden');
+  testAccuracyPanel.classList.add('hidden');
 
   connectWs(() => {
     sendWs({ type: 'start_session', participants: onboardingParticipants });
@@ -338,8 +452,33 @@ function startConversation() {
   });
 }
 
+// ── Test session start ────────────────────────────────────────────────────
+
+function startTestSession() {
+  isActiveTestMode = true;
+  isTestPlaying = false;
+  participantPanel.classList.remove('hidden');
+  newConversationBtn.classList.remove('hidden');
+  disconnectBtn.classList.remove('hidden');
+  transcriptEl.innerHTML = '';
+  reportPanel.classList.add('hidden');
+  testAccuracyPanel.classList.add('hidden');
+  testControlBar.classList.remove('hidden');
+
+  updateTestControls(false);
+
+  connectWs(() => {
+    sendWs({
+      type: 'start_test_mode',
+      script: testScript,
+      mode: testModeType,
+      ttsPlayback: testTtsPlayback,
+    });
+    // No mic recording in test mode — audio comes from the server's TTS generation
+  });
+}
+
 function resetConversation() {
-  // Tear down current session
   disconnectWs();
   levelFill.style.width = '0%';
   levelStatus.textContent = '';
@@ -348,6 +487,9 @@ function resetConversation() {
   participants = [];
   onboardingParticipants = [];
   entryElements.clear();
+  isActiveTestMode = false;
+  isTestPlaying = false;
+  testScript = null;
 
   // Reset UI
   transcriptEl.innerHTML = '<p class="transcript-placeholder">Klik op <strong>Verbinden</strong> om het gesprek te starten.</p>';
@@ -357,17 +499,26 @@ function resetConversation() {
   midSessionForm.classList.add('hidden');
   reportPanel.classList.add('hidden');
   reportContent.innerHTML = '';
+  testControlBar.classList.add('hidden');
+  testAccuracyPanel.classList.add('hidden');
   newConversationBtn.classList.add('hidden');
   disconnectBtn.classList.add('hidden');
   setStatus('Niet verbonden');
   langEl.textContent = '—';
 
-  // Reset onboarding form
+  // Reset onboarding
   pNameInput.value = '';
+  testScript = null;
+  testScriptTitle.textContent = '';
+  testParticipantList.innerHTML = '';
+  btnStartTest.disabled = true;
   renderOnboardingList();
   updateStartButton();
+  isTestMode = false;
+  btnTestToggle.classList.remove('active');
+  normalSetup.classList.remove('hidden');
+  testSetup.classList.add('hidden');
 
-  // Show onboarding again
   onboardingOverlay.classList.remove('hidden');
 }
 
@@ -440,8 +591,138 @@ function handleServerMessage(msg) {
       appendSegmentDivider(msg.label, time);
       break;
     }
+
+    // ── Test mode messages ──────────────────────────────────────────────
+
+    case 'test_ready':
+      setStatus(`Testscript geladen: "${msg.title}" — ${msg.lineCount} regels. Klik ▶ om te starten.`);
+      updateTestProgress(0, msg.lineCount, null);
+      break;
+
+    case 'test_progress':
+      updateTestProgress(msg.lineIndex, msg.totalLines, msg.currentLine);
+      break;
+
+    case 'test_accuracy':
+      appendTestAccuracy(msg);
+      break;
+
+    case 'test_complete':
+      showTestSummary(msg.summary);
+      updateTestControls(false);
+      isTestPlaying = false;
+      btnTestPlay.textContent = '▶';
+      break;
+
+    case 'test_narration':
+      appendTestNarration(msg.description);
+      break;
   }
 }
+
+// ── Test mode UI helpers ──────────────────────────────────────────────────
+
+function updateTestProgress(lineIndex, totalLines, currentLine) {
+  testProgressText.textContent = `Regel ${lineIndex}/${totalLines}`;
+  const pct = totalLines > 0 ? (lineIndex / totalLines) * 100 : 0;
+  testProgressFill.style.width = `${pct}%`;
+
+  if (currentLine && currentLine.type === 'speech') {
+    const preview = currentLine.text.length > 50 ? currentLine.text.slice(0, 50) + '…' : currentLine.text;
+    testCurrentLine.textContent = `${currentLine.speaker} (${getLangLabel(currentLine.language)}): "${preview}"`;
+  } else if (currentLine && currentLine.type === 'action') {
+    testCurrentLine.textContent = `[actie] ${currentLine.description}`;
+  } else if (currentLine && currentLine.type === 'pause') {
+    testCurrentLine.textContent = `[pauze ${currentLine.durationMs}ms]`;
+  } else {
+    testCurrentLine.textContent = '';
+  }
+}
+
+function updateTestControls(playing) {
+  btnTestPlay.textContent = playing ? '⏸' : '▶';
+}
+
+function appendTestNarration(description) {
+  const el = document.createElement('div');
+  el.className = 'test-narration';
+  el.textContent = description;
+  transcriptEl.appendChild(el);
+  transcriptEl.scrollTop = transcriptEl.scrollHeight;
+}
+
+function appendTestAccuracy(result) {
+  testAccuracyPanel.classList.remove('hidden');
+  const pct = Math.round(result.textSimilarity * 100);
+  const langOk = result.languageMatch ? '✓' : '✗';
+  const row = document.createElement('div');
+  row.className = `test-accuracy-row ${pct >= 70 ? 'ok' : 'warn'}`;
+  row.innerHTML = `
+    <span class="acc-speaker">${escapeHtml(result.expected.speaker)}</span>
+    <span class="acc-pct">${pct}%</span>
+    <span class="acc-lang">${langOk} ${escapeHtml(result.expected.language)}</span>
+    <span class="acc-text" title="${escapeHtml(result.actual.text)}">${escapeHtml(result.actual.text.slice(0, 40))}${result.actual.text.length > 40 ? '…' : ''}</span>
+  `;
+  testAccuracyContent.appendChild(row);
+}
+
+function showTestSummary(summary) {
+  testAccuracyPanel.classList.remove('hidden');
+  const avgPct = Math.round(summary.avgTextSimilarity * 100);
+  const langPct = Math.round(summary.languageAccuracy * 100);
+  const div = document.createElement('div');
+  div.className = 'test-accuracy-summary';
+  div.innerHTML = `
+    <strong>Samenvatting:</strong>
+    Tekst nauwkeurigheid: ${avgPct}% |
+    Taalherkenning: ${langPct}% |
+    ${summary.totalLines} regels verwerkt
+  `;
+  testAccuracyContent.appendChild(div);
+  testAccuracyPanel.scrollIntoView({ behavior: 'smooth' });
+}
+
+// ── Test control bar event listeners ─────────────────────────────────────
+
+btnTestPlay.addEventListener('click', () => {
+  if (!ws) return;
+  isTestPlaying = !isTestPlaying;
+  updateTestControls(isTestPlaying);
+  sendWs({ type: 'test_control', action: isTestPlaying ? 'play' : 'pause' });
+});
+
+btnTestStep.addEventListener('click', () => {
+  if (!ws) return;
+  isTestPlaying = false;
+  updateTestControls(false);
+  sendWs({ type: 'test_control', action: 'step' });
+});
+
+btnTestReset.addEventListener('click', () => {
+  if (!ws) return;
+  isTestPlaying = false;
+  updateTestControls(false);
+  transcriptEl.innerHTML = '';
+  entryElements.clear();
+  testAccuracyContent.innerHTML = '';
+  testAccuracyPanel.classList.add('hidden');
+  sendWs({ type: 'test_control', action: 'reset' });
+});
+
+document.querySelectorAll('.btn-speed').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.btn-speed').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    sendWs({ type: 'test_control', action: 'speed', speed: Number(btn.dataset.speed) });
+  });
+});
+
+btnTestTtsLive.addEventListener('click', () => {
+  const enabled = btnTestTtsLive.textContent !== 'TTS: aan';
+  btnTestTtsLive.textContent = enabled ? 'TTS: aan' : 'TTS: uit';
+  btnTestTtsLive.classList.toggle('active', enabled);
+  sendWs({ type: 'test_control', action: 'tts_toggle', ttsEnabled: enabled });
+});
 
 // ── Audio capture ─────────────────────────────────────────────────────────
 
@@ -509,7 +790,6 @@ function showCorrectionPopover(entryEl, anchorEl) {
   const currentLang = entryEl.dataset.sourceLang;
   const currentParticipantId = entryEl.dataset.participantId || null;
 
-  // Participant assignment buttons
   correctionParticipantBtns.innerHTML = '';
   participants.forEach(p => {
     const btn = document.createElement('button');
@@ -523,7 +803,6 @@ function showCorrectionPopover(entryEl, anchorEl) {
     correctionParticipantBtns.appendChild(btn);
   });
 
-  // Language correction buttons (unique langs from participants)
   correctionLangBtns.innerHTML = '';
   const activeLangs = [...new Set(participants.map(p => p.language))];
   activeLangs.forEach(code => {
@@ -534,7 +813,6 @@ function showCorrectionPopover(entryEl, anchorEl) {
     correctionLangBtns.appendChild(btn);
   });
 
-  // Delete button
   const delBtn = document.createElement('button');
   delBtn.className = 'correction-lang-btn correction-delete';
   delBtn.textContent = '×';
@@ -561,7 +839,6 @@ function applyLangCorrection(entryEl, newSourceLang) {
   const entryId = entryEl.dataset.entryId;
   const text = entryEl.dataset.text;
 
-  // Target: first language different from source
   const activeLangs = [...new Set(participants.map(p => p.language))];
   const otherLangs = activeLangs.filter(l => l !== newSourceLang);
   const targetLang = otherLangs[0] ?? null;
@@ -590,6 +867,8 @@ document.addEventListener('click', () => {
 });
 
 // ── Audio level meter + client-side VAD ──────────────────────────────────
+// With Deepgram server-side VAD (endpointing:300), the manual_commit is gone.
+// Client-side VAD only manages UI feedback and bandwidth pre-filtering.
 
 const SPEECH_THRESHOLD = 0.01;
 const SILENCE_MS = 900;
@@ -625,13 +904,8 @@ function updateLevel(rms) {
     if (vadSpeaking && !vadSilenceTimer) {
       vadSilenceTimer = setTimeout(() => {
         vadSilenceTimer = null;
-        if (vadSpeaking) {
-          const speechDuration = Date.now() - vadSpeechStart;
-          vadSpeaking = false;
-          if (speechDuration >= MIN_SPEECH_MS) {
-            sendWs({ type: 'manual_commit' });
-          }
-        }
+        // Deepgram handles endpointing server-side; no manual_commit needed
+        if (vadSpeaking) vadSpeaking = false;
       }, SILENCE_MS);
     }
   }
@@ -712,7 +986,7 @@ function pttEnd(btnEl) {
   if (activePttSpeaker !== btnEl.id) return;
   activePttSpeaker = null;
   btnEl.classList.remove('recording');
-  sendWs({ type: 'manual_commit' });
+  // No manual_commit: Deepgram endpoints via silence detection
   setStatus('Verwerken...');
 }
 
@@ -786,7 +1060,6 @@ function updateTranscript(entryId, language, participantId, participantName, tar
   const existing = entryElements.get(entryId);
   if (!existing) return;
 
-  // Confidence is unknown after correction — treat as confident
   const entry = buildBubble(entryId, language, participantId, participantName, true, targetLang, original, translated);
   existing.replaceWith(entry);
   entryElements.set(entryId, entry);

@@ -2,28 +2,10 @@ import WebSocket from 'ws';
 import { EventEmitter } from 'events';
 import type { Mode } from './types.js';
 
-const SCRIBE_URL = 'wss://api.elevenlabs.io/v1/speech-to-text/realtime';
-const TOKEN_URL = 'https://api.elevenlabs.io/v1/single-use-token/realtime_scribe';
+const DEEPGRAM_EU_URL = 'wss://api.eu.deepgram.com/v1/listen';
 const RECONNECT_DELAY_MS = 2000;
 const MAX_RECONNECT_ATTEMPTS = 5;
-const SAMPLE_RATE = 16000;
-
-// 10ms of PCM silence at 16kHz (160 Int16 samples = 320 zero bytes)
-const SILENT_COMMIT_CHUNK = Buffer.alloc(320).toString('base64');
-
-async function fetchSingleUseToken(apiKey: string): Promise<string> {
-  const res = await fetch(TOKEN_URL, {
-    method: 'POST',
-    headers: { 'xi-api-key': apiKey },
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Failed to fetch STT token (${res.status}): ${body}`);
-  }
-  const data = await res.json() as { token?: string };
-  if (!data.token) throw new Error('STT token response missing token field');
-  return data.token;
-}
+const KEEPALIVE_INTERVAL_MS = 8000;
 
 export class SttClient extends EventEmitter {
   private ws: WebSocket | null = null;
@@ -32,6 +14,7 @@ export class SttClient extends EventEmitter {
   private shouldReconnect = false;
   private apiKey: string;
   private buffer: Buffer[] = [];
+  private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(apiKey: string) {
     super();
@@ -42,38 +25,34 @@ export class SttClient extends EventEmitter {
     this.mode = mode;
     this.shouldReconnect = true;
     this.reconnectAttempts = 0;
-    this._connectWithToken();
+    this._connect();
   }
 
-  private async _connectWithToken(): Promise<void> {
-    let token: string;
-    try {
-      token = await fetchSingleUseToken(this.apiKey);
-    } catch (err) {
-      this.emit('error', err instanceof Error ? err : new Error(String(err)));
-      return;
-    }
-    this._connect(token);
-  }
-
-  private _connect(token: string): void {
+  private _connect(): void {
     const params = new URLSearchParams({
-      model_id: 'scribe_v2_realtime',
-      token,
-      audio_format: `pcm_${SAMPLE_RATE}`,
-      commit_strategy: 'manual',
-      include_language_detection: 'true',
-      include_timestamps: 'true',
+      model: 'nova-3',       // Risk: verify EU endpoint supports nova-3 + diarize + multi
+      language: 'multi',     // Multi-language auto-detection (NL + FA + EN)
+      punctuate: 'true',
+      diarize: 'true',
+      interim_results: 'true',
+      endpointing: '300',    // 300ms silence = utterance boundary (replaces manual commit)
+      encoding: 'linear16',
+      sample_rate: '16000',
+      channels: '1',
+      smart_format: 'true',
     });
 
-    const url = `${SCRIBE_URL}?${params.toString()}`;
-    console.log('[stt] connecting...');
+    const url = `${DEEPGRAM_EU_URL}?${params.toString()}`;
+    console.log('[stt] connecting to Deepgram EU...');
 
-    this.ws = new WebSocket(url);
+    this.ws = new WebSocket(url, {
+      headers: { Authorization: `Token ${this.apiKey}` },
+    });
 
     this.ws.on('open', () => {
-      console.log('[stt] connected');
+      console.log('[stt] connected to Deepgram EU');
       this.reconnectAttempts = 0;
+      this._startKeepalive();
       for (const chunk of this.buffer) {
         this._sendChunkRaw(chunk);
       }
@@ -92,12 +71,13 @@ export class SttClient extends EventEmitter {
 
     this.ws.on('close', (code, reason) => {
       console.log(`[stt] disconnected (code=${code} reason=${reason.toString()})`);
+      this._stopKeepalive();
       this.emit('disconnected');
       if (this.shouldReconnect && this.reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
         this.reconnectAttempts++;
         const delay = RECONNECT_DELAY_MS * this.reconnectAttempts;
         console.log(`[stt] reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
-        setTimeout(() => this._connectWithToken(), delay);
+        setTimeout(() => this._connect(), delay);
       }
     });
 
@@ -108,99 +88,120 @@ export class SttClient extends EventEmitter {
   }
 
   private _handleMessage(msg: Record<string, unknown>): void {
-    // ElevenLabs uses message_type field
-    const msgType = (msg.message_type ?? msg.type) as string | undefined;
+    const msgType = msg.type as string | undefined;
 
     switch (msgType) {
-      case 'session_started':
-        console.log('[stt] session started');
+      case 'Metadata':
+        console.log('[stt] Deepgram session ready');
         break;
 
-      case 'partial_transcript': {
-        const text = (msg.text as string | undefined) ?? '';
-        const lang = (msg.language_code as string | undefined) ?? '';
-        if (text) this.emit('partial', text, lang);
+      case 'SpeechStarted':
+        break;
+
+      case 'Results': {
+        const isFinal = msg.is_final as boolean;
+        const speechFinal = msg.speech_final as boolean;
+
+        type Word = { word?: string; speaker?: number; start?: number; end?: number };
+        type Alternative = { transcript?: string; words?: Word[] };
+        type Channel = { alternatives?: Alternative[] };
+        type Metadata = { detected_language?: string };
+
+        const channel = msg.channel as Channel | undefined;
+        const alt = channel?.alternatives?.[0];
+        const text = alt?.transcript ?? '';
+        const metadata = msg.metadata as Metadata | undefined;
+        const lang = metadata?.detected_language ?? '';
+
+        if (!text) break;
+
+        if (!isFinal) {
+          // Interim result: emit as partial for live display
+          this.emit('partial', text, lang);
+        } else if (speechFinal) {
+          // Endpointing fired: full utterance complete, extract diarization
+          const words = alt?.words ?? [];
+          const speakerCounts = new Map<number, number>();
+          for (const w of words) {
+            if (w.speaker !== undefined) {
+              speakerCounts.set(w.speaker, (speakerCounts.get(w.speaker) ?? 0) + 1);
+            }
+          }
+          let speakerIndex: number | null = null;
+          if (speakerCounts.size > 0) {
+            // Dominant speaker = most words in this utterance
+            speakerIndex = [...speakerCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+          }
+          console.log(`[stt] committed lang=${lang} speaker=${speakerIndex} text="${text.slice(0, 40)}"`);
+          this.emit('committed', text, lang, speakerIndex);
+        } else {
+          // is_final but not speech_final: stable mid-utterance segment, show as partial
+          this.emit('partial', text, lang);
+        }
         break;
       }
 
-      case 'committed_transcript_with_timestamps': {
-        // text is top-level, not nested under transcript
-        const text = (msg.text as string | undefined) ?? '';
-        const lang = (msg.language_code as string | undefined) ?? '';
-        console.log(`[stt] committed_with_timestamps: "${text}" lang=${lang}`);
-        if (text) this.emit('committed', text, lang);
+      case 'UtteranceEnd':
+        // Deepgram utterance end signal — already handled via speech_final in Results
         break;
-      }
 
-      case 'committed_transcript': {
-        const text = (msg.text as string | undefined) ?? '';
-        const lang = (msg.language_code as string | undefined) ?? '';
-        if (text) this.emit('committed', text, lang);
-        break;
-      }
-
-      // Surface all error variants
-      case 'error':
-      case 'auth_error':
-      case 'quota_exceeded':
-      case 'rate_limited':
-      case 'insufficient_audio_activity':
-      case 'input_error':
-      case 'chunk_size_exceeded':
-      case 'transcriber_error':
-      case 'session_time_limit_exceeded': {
-        const detail = JSON.stringify(msg);
-        console.error(`[stt] ElevenLabs error (${msgType}):`, detail);
-        this.emit('error', new Error(`ElevenLabs ${msgType}: ${detail}`));
+      case 'Error': {
+        const errMsg = JSON.stringify(msg);
+        console.error('[stt] Deepgram error:', errMsg);
+        this.emit('error', new Error(`Deepgram error: ${errMsg}`));
         break;
       }
 
       default:
-        console.log('[stt] unhandled message:', JSON.stringify(msg));
+        console.log('[stt] unhandled message type:', msgType);
         break;
     }
   }
 
-  sendChunk(pcmBase64: string): void {
-    const buf = Buffer.from(pcmBase64, 'base64');
+  // Accepts raw PCM Buffer and sends as binary frame to Deepgram
+  sendChunk(pcmBuffer: Buffer): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
-      this._sendChunkRaw(buf);
+      this._sendChunkRaw(pcmBuffer);
     } else {
-      this.buffer.push(buf);
+      this.buffer.push(pcmBuffer);
     }
   }
 
   private _sendChunkRaw(buf: Buffer): void {
     if (this.ws?.readyState !== WebSocket.OPEN) return;
-    // Correct ElevenLabs Scribe Realtime wire format
-    this.ws.send(JSON.stringify({
-      message_type: 'input_audio_chunk',
-      audio_base_64: buf.toString('base64'),
-      sample_rate: SAMPLE_RATE,
-      commit: false,
-    }));
+    this.ws.send(buf); // raw binary PCM — no JSON wrapping
   }
 
-  commitManual(): void {
-    if (this.ws?.readyState !== WebSocket.OPEN) return;
-    console.log('[stt] sending commit');
-    this.ws.send(JSON.stringify({
-      message_type: 'input_audio_chunk',
-      audio_base_64: SILENT_COMMIT_CHUNK,
-      sample_rate: SAMPLE_RATE,
-      commit: true,
-    }));
+  private _startKeepalive(): void {
+    this._stopKeepalive();
+    this.keepaliveTimer = setInterval(() => {
+      if (this.ws?.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify({ type: 'KeepAlive' }));
+      }
+    }, KEEPALIVE_INTERVAL_MS);
   }
+
+  private _stopKeepalive(): void {
+    if (this.keepaliveTimer) {
+      clearInterval(this.keepaliveTimer);
+      this.keepaliveTimer = null;
+    }
+  }
+
+  // No-op with Deepgram: server-side endpointing handles utterance boundaries.
+  // PTT mode works by stopping audio chunks; Deepgram detects silence after 300ms.
+  commitManual(): void {}
 
   switchMode(mode: Mode): void {
     if (this.mode === mode) return;
     this.mode = mode;
-    this.disconnect();
-    setTimeout(() => this._connectWithToken(), 100);
+    // With Deepgram server-side VAD, mode changes only affect client-side audio gating.
+    // No reconnection needed — the same WebSocket works for both auto and PTT modes.
   }
 
   disconnect(): void {
     this.shouldReconnect = false;
+    this._stopKeepalive();
     if (this.ws) {
       this.ws.close();
       this.ws = null;

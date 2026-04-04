@@ -29,34 +29,76 @@
       <p class="onboarding-title">Relay</p>
       <p class="onboarding-subtitle">Wie zijn er aanwezig?</p>
 
-      <form id="participant-form" class="participant-form" autocomplete="off">
-        <input id="p-name" type="text" class="p-input" placeholder="Naam" maxlength="40" />
-        <select id="p-role" class="p-select">
-          <option value="care_worker">Zorgverlener</option>
-          <option value="family_member">Familie</option>
-          <option value="client">Cliënt</option>
-          <option value="interpreter">Tolk</option>
-          <option value="other">Anders</option>
-        </select>
-        <select id="p-lang" class="p-select p-select-lang">
-          <option value="nl" selected>Nederlands</option>
-          <option value="en">Engels</option>
-          <option value="fa">Farsi</option>
-          <option value="ar">Arabisch</option>
-          <option value="tr">Turks</option>
-          <option value="de">Duits</option>
-          <option value="fr">Frans</option>
-        </select>
-        <button type="submit" id="p-add-btn" class="p-add-btn">+ Voeg toe</button>
-      </form>
+      <!-- Normal participant setup (hidden in test mode) -->
+      <div id="normal-setup">
+        <form id="participant-form" class="participant-form" autocomplete="off">
+          <input id="p-name" type="text" class="p-input" placeholder="Naam" maxlength="40" />
+          <select id="p-role" class="p-select">
+            <option value="care_worker">Zorgverlener</option>
+            <option value="family_member">Familie</option>
+            <option value="client">Cliënt</option>
+            <option value="interpreter">Tolk</option>
+            <option value="other">Anders</option>
+          </select>
+          <select id="p-lang" class="p-select p-select-lang">
+            <option value="nl" selected>Nederlands</option>
+            <option value="en">Engels</option>
+            <option value="fa">Farsi</option>
+            <option value="ar">Arabisch</option>
+            <option value="tr">Turks</option>
+            <option value="de">Duits</option>
+            <option value="fr">Frans</option>
+          </select>
+          <button type="submit" id="p-add-btn" class="p-add-btn">+ Voeg toe</button>
+        </form>
 
-      <div id="onboarding-participant-list" class="onboarding-participant-list"></div>
+        <div id="onboarding-participant-list" class="onboarding-participant-list"></div>
 
-      <p id="onboarding-hint" class="onboarding-hint">Voeg minimaal 2 deelnemers toe.</p>
+        <p id="onboarding-hint" class="onboarding-hint">Voeg minimaal 2 deelnemers toe.</p>
 
-      <button id="btn-start-session" class="btn-start-session" disabled>
-        Start gesprek →
-      </button>
+        <button id="btn-start-session" class="btn-start-session" disabled>
+          Start gesprek →
+        </button>
+      </div>
+
+      <!-- Test mode setup (shown when test toggle is on) -->
+      <div id="test-setup" class="hidden">
+        <!-- Mode selector: audio vs text -->
+        <div class="test-mode-selector">
+          <button id="btn-test-mode-text" class="btn-test-mode-type active" data-mode="text">
+            Tekst (snel)
+          </button>
+          <button id="btn-test-mode-audio" class="btn-test-mode-type" data-mode="audio">
+            Audio (volledig)
+          </button>
+        </div>
+
+        <!-- TTS playback toggle -->
+        <div class="test-tts-row">
+          <label class="test-tts-label">TTS-vertaling tijdens test</label>
+          <button id="btn-test-tts" class="btn-test-tts active">aan</button>
+        </div>
+
+        <!-- Script upload -->
+        <div id="test-drop-zone" class="test-drop-zone">
+          <p class="test-drop-label">Sleep testscript (.json) hierin of klik</p>
+          <input id="test-file-input" type="file" accept=".json" class="hidden" />
+        </div>
+        <button id="btn-load-example" class="btn-load-example">Laad voorbeeld: Intake Benhaddou</button>
+
+        <!-- Participant list populated from script -->
+        <div id="test-participant-list" class="onboarding-participant-list"></div>
+        <p id="test-script-title" class="test-script-title"></p>
+
+        <button id="btn-start-test" class="btn-start-session" disabled>
+          Start test →
+        </button>
+      </div>
+
+      <!-- Test mode toggle (always visible in onboarding) -->
+      <div class="test-toggle-row">
+        <button id="btn-test-toggle" class="btn-test-toggle">Testmodus</button>
+      </div>
     </div>
   </div>
 
@@ -109,6 +151,29 @@
       <button type="submit" class="p-add-btn">Toevoegen</button>
       <button type="button" id="btn-cancel-mid" class="btn-cancel-mid">×</button>
     </form>
+  </div>
+
+  <!-- ── Test mode control bar (shown during test sessions) ──────────── -->
+  <div id="test-control-bar" class="test-control-bar hidden">
+    <div class="test-controls-left">
+      <button id="btn-test-reset" class="btn-test-ctrl" title="Reset">↺</button>
+      <button id="btn-test-play" class="btn-test-ctrl btn-test-play" title="Afspelen">▶</button>
+      <button id="btn-test-step" class="btn-test-ctrl" title="Stap">▶|</button>
+    </div>
+    <div class="test-controls-center">
+      <span id="test-progress-text" class="test-progress-text">Regel 0/0</span>
+      <div id="test-progress-bar" class="test-progress-bar">
+        <div id="test-progress-fill" class="test-progress-fill" style="width:0%"></div>
+      </div>
+      <span id="test-current-line" class="test-current-line"></span>
+    </div>
+    <div class="test-controls-right">
+      <span class="test-speed-label">Snelheid:</span>
+      <button class="btn-speed active" data-speed="1">1x</button>
+      <button class="btn-speed" data-speed="2">2x</button>
+      <button class="btn-speed" data-speed="5">5x</button>
+      <button id="btn-test-tts-live" class="btn-test-tts-live active" title="TTS vertaling aan/uit">TTS: aan</button>
+    </div>
   </div>
 
   <!-- ── Main content ──────────────────────────────────────────────────── -->
@@ -174,6 +239,12 @@
         <button id="btn-copy-report" class="btn-copy">Kopieer</button>
       </div>
       <div id="report-content" class="report-content"></div>
+    </section>
+
+    <!-- Test accuracy summary (shown after audio test completes) -->
+    <section id="test-accuracy-panel" class="test-accuracy-panel hidden">
+      <h3 class="test-accuracy-title">Testresultaten</h3>
+      <div id="test-accuracy-content" class="test-accuracy-content"></div>
     </section>
 
   </main>

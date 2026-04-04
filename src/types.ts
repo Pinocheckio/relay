@@ -31,6 +31,7 @@ export interface TranscriptEntry {
   translated: string;
   timestamp: Date;
   segmentId: string;
+  speakerIndex?: number | null; // Deepgram diarization speaker index
 }
 
 export interface Session {
@@ -41,6 +42,46 @@ export interface Session {
   segments: Segment[];
   currentSegmentId: string | null;
   mode: Mode;
+}
+
+// ── Test script types ─────────────────────────────────────────────────────
+
+export type TestMode = 'audio' | 'text';
+export type ActionEffect = 'leave' | 'rejoin' | 'none';
+
+export interface TestScriptParticipant {
+  name: string;
+  role: ParticipantRole;
+  language: string;
+  voiceId?: string; // ElevenLabs voice override for audio test mode
+}
+
+export interface SpeechLine {
+  type: 'speech';
+  speaker: string;
+  language: string;
+  text: string;
+}
+
+export interface ActionLine {
+  type: 'action';
+  description: string;
+  effect: ActionEffect;
+  participant?: string;
+}
+
+export interface PauseLine {
+  type: 'pause';
+  durationMs: number;
+}
+
+export type TestScriptLine = SpeechLine | ActionLine | PauseLine;
+
+export interface TestScript {
+  title: string;
+  description: string;
+  participants: TestScriptParticipant[];
+  lines: TestScriptLine[];
 }
 
 // ── Messages: Browser → Server ────────────────────────────────────────────
@@ -105,6 +146,20 @@ export interface GenerateReportMessage {
   type: 'generate_report';
 }
 
+export interface StartTestModeMessage {
+  type: 'start_test_mode';
+  script: TestScript;
+  mode: TestMode;
+  ttsPlayback: boolean;
+}
+
+export interface TestControlMessage {
+  type: 'test_control';
+  action: 'play' | 'pause' | 'step' | 'reset' | 'speed' | 'tts_toggle';
+  speed?: number;
+  ttsEnabled?: boolean;
+}
+
 export type ClientMessage =
   | AudioChunkMessage
   | ManualCommitMessage
@@ -116,7 +171,9 @@ export type ClientMessage =
   | AssignSpeakerMessage
   | RedoEntryMessage
   | DeleteEntryMessage
-  | GenerateReportMessage;
+  | GenerateReportMessage
+  | StartTestModeMessage
+  | TestControlMessage;
 
 // ── Messages: Server → Browser ────────────────────────────────────────────
 
@@ -138,6 +195,7 @@ export interface CommittedTranscriptMessage {
   translated: string;
   timestamp: string;
   segmentId: string;
+  speakerIndex: number | null; // Deepgram diarization index (Phase 3)
 }
 
 export interface CorrectedTranscriptMessage {
@@ -188,6 +246,43 @@ export interface SegmentChangeMessage {
   label: string;
 }
 
+export interface TestReadyMessage {
+  type: 'test_ready';
+  lineCount: number;
+  title: string;
+}
+
+export interface TestProgressMessage {
+  type: 'test_progress';
+  lineIndex: number;
+  totalLines: number;
+  currentLine: TestScriptLine | null;
+}
+
+export interface TestAccuracyMessage {
+  type: 'test_accuracy';
+  lineIndex: number;
+  expected: { text: string; language: string; speaker: string };
+  actual: { text: string; language: string; speakerIndex: number | null };
+  textSimilarity: number;
+  languageMatch: boolean;
+}
+
+export interface TestCompleteMessage {
+  type: 'test_complete';
+  summary: {
+    totalLines: number;
+    avgTextSimilarity: number;
+    languageAccuracy: number;
+    diarizationConsistency: number;
+  };
+}
+
+export interface TestNarrationMessage {
+  type: 'test_narration';
+  description: string;
+}
+
 export type ServerMessage =
   | PartialTranscriptMessage
   | CommittedTranscriptMessage
@@ -198,4 +293,9 @@ export type ServerMessage =
   | StatusMessage
   | ErrorMessage
   | ParticipantsUpdateMessage
-  | SegmentChangeMessage;
+  | SegmentChangeMessage
+  | TestReadyMessage
+  | TestProgressMessage
+  | TestAccuracyMessage
+  | TestCompleteMessage
+  | TestNarrationMessage;

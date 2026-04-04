@@ -52,6 +52,82 @@ export async function normalizeScript(text: string, lang: Speaker): Promise<stri
   return completion.choices[0]?.message?.content?.trim() ?? text;
 }
 
+// ── Text-based language detection ─────────────────────────────────────────
+// ElevenLabs audio-based detection confuses similar-sounding languages (NL/EN).
+// These word lists let us verify the detected language from the actual text.
+// Words are chosen to be strong indicators for one language, not shared.
+
+const TEXT_LANG_MARKERS: Record<string, Set<string>> = {
+  nl: new Set([
+    'de', 'het', 'een', 'ik', 'niet', 'voor', 'maar', 'ook', 'te', 'aan',
+    'nog', 'dit', 'wel', 'naar', 'dan', 'zou', 'bij', 'heeft', 'uit', 'zo',
+    'werd', 'deze', 'meer', 'geen', 'moet', 'veel', 'onze', 'omdat', 'altijd',
+    'nooit', 'graag', 'goed', 'alles', 'niets', 'alleen', 'vaak', 'soms',
+    'mijn', 'jouw', 'wij', 'zij', 'dat', 'wie', 'dus', 'toch', 'ja', 'nee',
+    'misschien', 'eigenlijk', 'gewoon', 'jullie', 'hier', 'daar', 'hoe',
+    'waar', 'waarom', 'wanneer', 'welke', 'kunnen', 'willen', 'moeten',
+  ]),
+  en: new Set([
+    'the', 'you', 'he', 'she', 'they', 'it', 'not', 'have', 'are', 'with',
+    'from', 'can', 'will', 'would', 'could', 'should', 'my', 'your', 'our',
+    'their', 'what', 'which', 'who', 'how', 'why', 'when', 'where', 'being',
+    'about', 'after', 'before', 'between', 'through', 'just', 'also', 'very',
+    'only', 'really', 'every', 'some', 'many', 'much', 'because', 'although',
+    'while', 'yes', 'maybe', 'actually', 'already', 'enough', 'still', 'again',
+    'never', 'always', 'sometimes', 'often', 'there', 'here', 'think', 'know',
+  ]),
+  de: new Set([
+    'ich', 'nicht', 'das', 'ist', 'und', 'aber', 'auch', 'noch', 'schon',
+    'immer', 'jetzt', 'hier', 'dort', 'warum', 'weil', 'wenn', 'dass',
+    'kann', 'muss', 'soll', 'wird', 'haben', 'sein', 'werden', 'kein',
+    'sehr', 'viel', 'mehr', 'andere',
+  ]),
+  fr: new Set([
+    'le', 'la', 'les', 'une', 'des', 'je', 'tu', 'nous', 'vous',
+    'ils', 'elles', 'est', 'sont', 'pas', 'mais', 'aussi', 'avec', 'pour',
+    'dans', 'sur', 'que', 'qui', 'quoi', 'comment', 'pourquoi', 'quand',
+    'jamais', 'toujours', 'peut', 'doit', 'fait', 'bien', 'beaucoup',
+  ]),
+};
+
+/**
+ * Detect the language of transcribed text by counting marker-word hits.
+ * Returns the best-matching candidate, or null if inconclusive.
+ * Only competes among the provided candidate languages.
+ */
+export function detectTextLanguage(text: string, candidates: Speaker[]): Speaker | null {
+  const words = text.toLowerCase().replace(/[^\p{L}\s]/gu, '').split(/\s+/).filter(Boolean);
+  if (words.length === 0) return null;
+
+  // For non-Latin text, skip word analysis (script detection handles those)
+  if (!isLatinOnly(text)) return null;
+
+  const scores: Record<string, number> = {};
+  for (const lang of candidates) {
+    const markers = TEXT_LANG_MARKERS[lang];
+    if (!markers || markers.size === 0) continue;
+    scores[lang] = words.filter(w => markers.has(w)).length;
+  }
+
+  let best: Speaker | null = null;
+  let bestScore = 0;
+  for (const [lang, score] of Object.entries(scores)) {
+    if (score > bestScore) {
+      bestScore = score;
+      best = lang as Speaker;
+    }
+  }
+
+  if (bestScore === 0) return null;
+
+  // Must strictly beat runner-up to be confident
+  const sortedScores = Object.values(scores).sort((a, b) => b - a);
+  const runnerUp = sortedScores[1] ?? 0;
+  if (bestScore <= runnerUp) return null;
+
+  return best;
+}
+
 // Known language code prefixes → canonical Speaker code
 const LANG_PREFIXES: Array<[string, Speaker]> = [
   ['nl', 'nl'],

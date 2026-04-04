@@ -16,16 +16,24 @@ const LANGUAGE_CODES: Record<Speaker, string> = {
   en: 'en',
 };
 
+export interface SynthesizeOptions {
+  // Output format string: 'mp3_44100_128' (default) or 'pcm_16000' for test mode audio
+  outputFormat?: string;
+}
+
 export async function synthesize(
   text: string,
   targetSpeaker: Speaker,
   apiKey: string,
   voiceId: string,
   onChunk: (base64Chunk: string) => void,
+  options?: SynthesizeOptions,
 ): Promise<void> {
   const url = `${ELEVENLABS_BASE}/text-to-speech/${voiceId}/stream`;
 
   const modelId = MODEL_BY_LANG[targetSpeaker] ?? 'eleven_multilingual_v2';
+  const outputFormat = options?.outputFormat ?? 'mp3_44100_128';
+
   // eleven_multilingual_v2 auto-detects language from text — don't pass language_code
   const langCodeField = modelId !== 'eleven_multilingual_v2'
     ? { language_code: LANGUAGE_CODES[targetSpeaker] }
@@ -41,7 +49,7 @@ export async function synthesize(
       text,
       model_id: modelId,
       ...langCodeField,
-      output_format: 'mp3_44100_128',
+      output_format: outputFormat,
       voice_settings: {
         stability: 0.5,
         similarity_boost: 0.75,
