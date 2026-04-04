@@ -81,6 +81,22 @@ wss.on('connection', (clientWs: WebSocket) => {
     const partialDetected = detectSpeaker(language);
     if (partialDetected) lastPartialLang = partialDetected;
     if (text) lastPartialText = text;
+
+    // Suppress partials from languages outside the active participant set.
+    // Non-Latin fallback: if one side is non-Latin and detected code is unrecognised,
+    // still allow through (mirrors the committed handler heuristic).
+    const activeLangs = getActiveLangs(session);
+    if (activeLangs.length > 0) {
+      const matchesPair = partialDetected && activeLangs.includes(partialDetected);
+      const nonLatinFallback = !matchesPair
+        && activeLangs.some(l => isNonLatin(l))
+        && activeLangs.some(l => !isNonLatin(l));
+      if (!matchesPair && !nonLatinFallback) {
+        send({ type: 'partial_transcript', text: '', language });
+        return;
+      }
+    }
+
     send({ type: 'partial_transcript', text, language });
   });
 
