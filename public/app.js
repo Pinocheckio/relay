@@ -175,7 +175,6 @@ let testTtsPlayback = true;
 const testParticipantList  = document.getElementById('test-participant-list');
 const testScriptTitle      = document.getElementById('test-script-title');
 const btnStartTest         = document.getElementById('btn-start-test');
-const btnLoadExample       = document.getElementById('btn-load-example');
 const testDropZone         = document.getElementById('test-drop-zone');
 const testFileInput        = document.getElementById('test-file-input');
 const btnTestModeText      = document.getElementById('btn-test-mode-text');
@@ -230,11 +229,14 @@ function renderTestParticipantList(participants) {
   });
 }
 
-btnLoadExample.addEventListener('click', () => {
-  fetch('/test-scripts/intake-benhaddou.json')
-    .then(r => r.json())
-    .then(data => loadTestScript(data))
-    .catch(() => alert('Voorbeeld kon niet worden geladen.'));
+document.querySelectorAll('.btn-load-example').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const script = btn.dataset.script;
+    fetch(`/test-scripts/${script}`)
+      .then(r => r.json())
+      .then(data => loadTestScript(data))
+      .catch(() => alert('Voorbeeld kon niet worden geladen.'));
+  });
 });
 
 testDropZone.addEventListener('click', () => testFileInput.click());

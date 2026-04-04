@@ -84,7 +84,10 @@
           <p class="test-drop-label">Sleep testscript (.json) hierin of klik</p>
           <input id="test-file-input" type="file" accept=".json" class="hidden" />
         </div>
-        <button id="btn-load-example" class="btn-load-example">Laad voorbeeld: Intake Benhaddou</button>
+        <div class="test-example-row">
+          <button class="btn-load-example" data-script="intake-benhaddou.json">Benhaddou (NL↔EN)</button>
+          <button class="btn-load-example" data-script="intake-ahmadi.json">Ahmadi (NL↔FA)</button>
+        </div>
 
         <!-- Participant list populated from script -->
         <div id="test-participant-list" class="onboarding-participant-list"></div>
