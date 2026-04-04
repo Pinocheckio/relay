@@ -2,11 +2,12 @@ import type { Speaker } from './types.js';
 
 const ELEVENLABS_BASE = 'https://api.elevenlabs.io/v1';
 
-// eleven_flash_v2_5 doesn't support Farsi — use multilingual_v2 for FA
+// eleven_flash_v2_5 for NL/EN (fast, good quality)
+// eleven_v3 for FA (best multilingual quality, higher latency)
 const MODEL_BY_LANG: Record<string, string> = {
   nl: 'eleven_flash_v2_5',
   en: 'eleven_flash_v2_5',
-  fa: 'eleven_multilingual_v2',
+  fa: 'eleven_v3',
 };
 
 // Map Speaker to BCP-47 for ElevenLabs
@@ -34,8 +35,9 @@ export async function synthesize(
   const modelId = MODEL_BY_LANG[targetSpeaker] ?? 'eleven_multilingual_v2';
   const outputFormat = options?.outputFormat ?? 'mp3_44100_128';
 
-  // eleven_multilingual_v2 auto-detects language from text — don't pass language_code
-  const langCodeField = modelId !== 'eleven_multilingual_v2'
+  // flash_v2_5 needs explicit language_code; v3 and multilingual_v2 auto-detect
+  const needsLangCode = modelId === 'eleven_flash_v2_5';
+  const langCodeField = needsLangCode
     ? { language_code: LANGUAGE_CODES[targetSpeaker] }
     : {};
 

@@ -9,6 +9,7 @@ import { SttClient } from './stt.js';
 import { TestModePlayer } from './test-mode.js';
 import { translate, detectSpeaker, detectTextLanguage, isNonLatin, normalizeScript, convertToLanguage } from './translator.js';
 import { synthesize } from './tts.js';
+import { getVoice } from './voices.js';
 import { createSession, addEntry, updateEntry, makeEntryId, generateReport } from './session.js';
 import {
   createParticipant,
@@ -19,17 +20,13 @@ import {
   getActiveLangs,
   resolveParticipant,
 } from './participants.js';
-import type { ClientMessage, Speaker, Participant } from './types.js';
+import type { ClientMessage, Speaker, Participant, Gender } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const DEEPGRAM_API_KEY  = process.env.DEEPGRAM_API_KEY ?? '';
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY ?? '';
 const OPENAI_API_KEY    = process.env.OPENAI_API_KEY ?? '';
-const VOICE_NL = process.env.ELEVENLABS_VOICE_NL ?? 'nPczCjzI2devNBz1zQrb';
-const VOICE_FA = process.env.ELEVENLABS_VOICE_FA ?? '9BWtsMINqrJLrRacOk9x';
-const VOICE_EN = process.env.ELEVENLABS_VOICE_EN ?? 'TxGEqnHWrfWFTfGW9XjX';
-const VOICES: Record<string, string> = { nl: VOICE_NL, fa: VOICE_FA, en: VOICE_EN };
 const PORT = Number(process.env.PORT ?? 3000);
 
 if (!DEEPGRAM_API_KEY)   throw new Error('DEEPGRAM_API_KEY is not set');
@@ -247,8 +244,13 @@ wss.on('connection', (clientWs: WebSocket) => {
 
       const shouldTts = !isTestMode || testTtsEnabled;
       if (targetSpeaker && translated && shouldTts) {
-        const voiceId = VOICES[targetSpeaker] ?? VOICE_NL;
-        console.log(`[tts] synthesizing to ${targetSpeaker} using voice ${voiceId}`);
+        // Pick voice matching the target language + listener's gender
+        const targetParticipant = session.participants.find(
+          p => p.language === targetSpeaker && p.isPresent,
+        );
+        const voiceGender: Gender = targetParticipant?.gender ?? 'female';
+        const voiceId = getVoice(targetSpeaker, voiceGender);
+        console.log(`[tts] synthesizing to ${targetSpeaker} (${voiceGender}) using voice ${voiceId}`);
         let chunkCount = 0;
         await synthesize(translated, targetSpeaker, ELEVENLABS_API_KEY, voiceId, (chunk) => {
           chunkCount++;
@@ -274,7 +276,7 @@ wss.on('connection', (clientWs: WebSocket) => {
 
       case 'start_session': {
         for (const p of msg.participants) {
-          session.participants.push(createParticipant(p.name, p.role, p.language));
+          session.participants.push(createParticipant(p.name, p.role, p.language, p.gender ?? 'female'));
         }
         const firstSeg = startNewSegment(session);
         send({
@@ -298,7 +300,7 @@ wss.on('connection', (clientWs: WebSocket) => {
 
         // Set up session participants from script definition
         for (const p of msg.script.participants) {
-          session.participants.push(createParticipant(p.name, p.role as import('./types.js').ParticipantRole, p.language));
+          session.participants.push(createParticipant(p.name, p.role as import('./types.js').ParticipantRole, p.language, p.gender ?? 'female'));
         }
         startNewSegment(session);
 
@@ -371,7 +373,7 @@ wss.on('connection', (clientWs: WebSocket) => {
         break;
 
       case 'add_participant': {
-        const newParticipant = createParticipant(msg.name, msg.role, msg.language);
+        const newParticipant = createParticipant(msg.name, msg.role, msg.language, msg.gender ?? 'female');
         const addSeg = addParticipant(session, newParticipant);
         send({
           type: 'participants_update',
@@ -458,7 +460,10 @@ wss.on('connection', (clientWs: WebSocket) => {
           });
           updateEntry(session, entryId, { speaker: sourceLang, original: nativeText, translated });
           if (targetLang && translated) {
-            const voiceId = VOICES[targetLang] ?? VOICE_NL;
+            const redoTarget = session.participants.find(
+              p => p.language === targetLang && p.isPresent,
+            );
+            const voiceId = getVoice(targetLang, redoTarget?.gender ?? 'female');
             await synthesize(translated, targetLang, ELEVENLABS_API_KEY, voiceId, (chunk) => {
               send({ type: 'tts_audio', data: chunk });
             });

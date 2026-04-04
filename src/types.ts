@@ -4,11 +4,14 @@ export type Mode = 'auto' | 'manual';
 export type Speaker = string;
 export type ParticipantRole = 'care_worker' | 'family_member' | 'client' | 'interpreter' | 'other';
 
+export type Gender = 'female' | 'male';
+
 export interface Participant {
   id: string;
   name: string;
   role: ParticipantRole;
   language: Speaker;
+  gender: Gender;
   isPresent: boolean;
   joinedAt: Date;
   presenceLog: Array<{ action: 'join' | 'leave'; at: Date }>;
@@ -53,7 +56,8 @@ export interface TestScriptParticipant {
   name: string;
   role: ParticipantRole;
   language: string;
-  voiceId?: string; // ElevenLabs voice override for audio test mode
+  gender?: Gender;    // Defaults to 'female' if omitted
+  voiceId?: string;   // ElevenLabs voice override for audio test mode
 }
 
 export interface SpeechLine {
@@ -103,7 +107,7 @@ export interface ModeSwitchMessage {
 
 export interface StartSessionMessage {
   type: 'start_session';
-  participants: Array<{ name: string; role: ParticipantRole; language: Speaker }>;
+  participants: Array<{ name: string; role: ParticipantRole; language: Speaker; gender?: Gender }>;
 }
 
 export interface AddParticipantMessage {
@@ -111,6 +115,7 @@ export interface AddParticipantMessage {
   name: string;
   role: ParticipantRole;
   language: Speaker;
+  gender?: Gender;
 }
 
 export interface RemoveParticipantMessage {

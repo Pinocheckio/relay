@@ -1,4 +1,4 @@
-import type { Session, Participant, Segment, Speaker, ParticipantRole } from './types.js';
+import type { Session, Participant, Segment, Speaker, ParticipantRole, Gender } from './types.js';
 
 let participantCounter = 0;
 let segmentCounter = 0;
@@ -11,13 +11,14 @@ export const ROLE_LABELS: Record<string, string> = {
   other: 'Anders',
 };
 
-export function createParticipant(name: string, role: ParticipantRole, language: Speaker): Participant {
+export function createParticipant(name: string, role: ParticipantRole, language: Speaker, gender: Gender = 'female'): Participant {
   const now = new Date();
   return {
     id: `p-${Date.now()}-${++participantCounter}`,
     name,
     role,
     language,
+    gender,
     isPresent: true,
     joinedAt: now,
     presenceLog: [{ action: 'join', at: now }],

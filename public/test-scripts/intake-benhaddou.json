@@ -2,10 +2,10 @@
   "title": "Intake Familie Benhaddou",
   "description": "Intake at youth care org. Sophie (NL caregiver) meets Mehdi (15, client), Farid (father) & Nadia (mother). Farid leaves temporarily for a phone call, sensitive disclosure happens in his absence.",
   "participants": [
-    { "name": "Sophie", "role": "care_worker", "language": "nl" },
-    { "name": "Farid", "role": "family_member", "language": "en" },
-    { "name": "Nadia", "role": "family_member", "language": "en" },
-    { "name": "Mehdi", "role": "client", "language": "en" }
+    { "name": "Sophie", "role": "care_worker", "language": "nl", "gender": "female" },
+    { "name": "Farid", "role": "family_member", "language": "en", "gender": "male" },
+    { "name": "Nadia", "role": "family_member", "language": "en", "gender": "female" },
+    { "name": "Mehdi", "role": "client", "language": "en", "gender": "male" }
   ],
   "lines": [
     { "type": "speech", "speaker": "Sophie", "language": "nl", "text": "Goedemiddag, welkom. Ik ben Sophie, ik ben jullie vaste begeleider hier. Jullie zijn de familie Benhaddou?" },

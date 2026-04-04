@@ -3,14 +3,7 @@ import type { TestScript, TestScriptLine, SpeechLine, ActionLine, Session, Speak
 import type { SttClient } from './stt.js';
 import type { synthesize } from './tts.js';
 import { removeParticipant, rejoinParticipant } from './participants.js';
-
-// Default voice pools per language for audio test mode.
-// English uses 3 distinct voices for diarization testing (Farid/Nadia/Mehdi).
-const VOICE_POOL: Record<string, string[]> = {
-  nl: ['nPczCjzI2devNBz1zQrb'],                            // Brian (NL)
-  en: ['TxGEqnHWrfWFTfGW9XjX', 'EXAVITQu4vr4xnSDxMaL', 'pqHfZKP75CvOlQylNhV4'], // Josh, Bella, Bill
-  fa: ['9BWtsMINqrJLrRacOk9x'],                            // Aria (FA)
-};
+import { getVoice, getVoicePool } from './voices.js';
 
 interface AccuracyResult {
   expected: { text: string; language: string; speaker: string };
@@ -66,15 +59,13 @@ export class TestModePlayer extends EventEmitter {
   }
 
   private assignVoices(): void {
-    const langCounters = new Map<string, number>();
     for (const p of this.script.participants) {
       if (p.voiceId) {
         this.voiceAssignments.set(p.name, p.voiceId);
       } else {
-        const pool = VOICE_POOL[p.language] ?? VOICE_POOL['en'] ?? [];
-        const idx = langCounters.get(p.language) ?? 0;
-        langCounters.set(p.language, idx + 1);
-        this.voiceAssignments.set(p.name, pool[idx % pool.length] ?? 'nPczCjzI2devNBz1zQrb');
+        // Use gender-matched voice from registry; fall back to pool rotation for same-gender groups
+        const gender = p.gender ?? 'female';
+        this.voiceAssignments.set(p.name, getVoice(p.language, gender));
       }
     }
   }

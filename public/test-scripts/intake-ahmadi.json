@@ -2,9 +2,9 @@
   "title": "Intake Familie Ahmadi",
   "description": "Intake at youth care org. Lisa (NL caregiver) meets Yasmin (14, client, speaks Dutch) and her mother Maryam (speaks Farsi). Sensitive disclosure about absent father and parentification happens while Maryam is out of the room.",
   "participants": [
-    { "name": "Lisa", "role": "care_worker", "language": "nl" },
-    { "name": "Yasmin", "role": "client", "language": "nl" },
-    { "name": "Maryam", "role": "family_member", "language": "fa" }
+    { "name": "Lisa", "role": "care_worker", "language": "nl", "gender": "female" },
+    { "name": "Yasmin", "role": "client", "language": "nl", "gender": "female" },
+    { "name": "Maryam", "role": "family_member", "language": "fa", "gender": "female" }
   ],
   "lines": [
     { "type": "speech", "speaker": "Lisa", "language": "nl", "text": "Goedemiddag, welkom allebei. Ik ben Lisa, ik word jullie vaste begeleider. Jij bent Yasmin?" },

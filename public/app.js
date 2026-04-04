@@ -99,6 +99,7 @@ const participantForm           = document.getElementById('participant-form');
 const pNameInput                = document.getElementById('p-name');
 const pRoleSelect               = document.getElementById('p-role');
 const pLangSelect               = document.getElementById('p-lang');
+const pGenderSelect             = document.getElementById('p-gender');
 const onboardingParticipantList = document.getElementById('onboarding-participant-list');
 const onboardingHint            = document.getElementById('onboarding-hint');
 const btnStartSession           = document.getElementById('btn-start-session');
@@ -152,6 +153,7 @@ participantForm.addEventListener('submit', (e) => {
     name,
     role: pRoleSelect.value,
     language: pLangSelect.value,
+    gender: pGenderSelect.value,
   });
   pNameInput.value = '';
   pNameInput.focus();
@@ -318,6 +320,7 @@ const midParticipantForm    = document.getElementById('mid-participant-form');
 const midPNameInput         = document.getElementById('mid-p-name');
 const midPRoleSelect        = document.getElementById('mid-p-role');
 const midPLangSelect        = document.getElementById('mid-p-lang');
+const midPGenderSelect      = document.getElementById('mid-p-gender');
 const btnCancelMid          = document.getElementById('btn-cancel-mid');
 const levelFill             = document.getElementById('level-fill');
 const levelStatus           = document.getElementById('level-status');
@@ -1149,6 +1152,7 @@ midParticipantForm.addEventListener('submit', (e) => {
     name,
     role: midPRoleSelect.value,
     language: midPLangSelect.value,
+    gender: midPGenderSelect.value,
   });
   midPNameInput.value = '';
   midSessionForm.classList.add('hidden');
