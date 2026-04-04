@@ -19,6 +19,10 @@ interface AccuracyResult {
   languageMatch: boolean;
 }
 
+// Callback for text-mode commits: awaited so player waits for the full pipeline
+// (translation + TTS synthesis) before advancing to the next line.
+export type CommitTextHandler = (text: string, lang: string, participantName: string) => Promise<void>;
+
 export interface TestModePlayerOptions {
   script: TestScript;
   session: Session;
@@ -27,6 +31,7 @@ export interface TestModePlayerOptions {
   stt?: SttClient;        // Required in audio mode only
   synthesizeFn: typeof synthesize;
   sendFn: (msg: object) => void;
+  onCommitText?: CommitTextHandler;  // Text mode: awaited pipeline handler
 }
 
 export class TestModePlayer extends EventEmitter {
@@ -37,6 +42,7 @@ export class TestModePlayer extends EventEmitter {
   private stt: SttClient | null;
   private synthesizeFn: typeof synthesize;
   private sendFn: (msg: object) => void;
+  private onCommitText: CommitTextHandler | null;
 
   private lineIndex = 0;
   private playing = false;
@@ -55,6 +61,7 @@ export class TestModePlayer extends EventEmitter {
     this.stt = opts.stt ?? null;
     this.synthesizeFn = opts.synthesizeFn;
     this.sendFn = opts.sendFn;
+    this.onCommitText = opts.onCommitText ?? null;
     this.assignVoices();
   }
 
@@ -87,6 +94,7 @@ export class TestModePlayer extends EventEmitter {
 
   pause(): void {
     this.playing = false;
+    this.sendFn({ type: 'test_audio_stop' });
   }
 
   async step(): Promise<void> {
@@ -104,6 +112,7 @@ export class TestModePlayer extends EventEmitter {
     this.playing = false;
     this.lineIndex = 0;
     this.accuracyResults = [];
+    this.sendFn({ type: 'test_audio_stop' });
     this.emitProgress();
   }
 
@@ -180,13 +189,17 @@ export class TestModePlayer extends EventEmitter {
   }
 
   private async processSpeechText(line: SpeechLine): Promise<void> {
-    // Inject text directly into the pipeline — server.ts wires 'committed' to handleCommitted
-    this.emit('committed', line.text, line.language, null);
-
-    // Pacing: simulate realistic speech duration so the transcript feels natural
-    const wordCount = line.text.split(/\s+/).length;
-    const speechDurationMs = (wordCount * 100 + 500) / this.speed;
-    await this.sleep(speechDurationMs);
+    if (this.onCommitText) {
+      // Await the full pipeline (translate + TTS synthesis) so we don't advance
+      // to the next line until this one's audio has been sent to the client.
+      await this.onCommitText(line.text, line.language, line.speaker);
+    } else {
+      // Fallback: fire-and-forget with simulated pacing
+      this.emit('committed', line.text, line.language, null);
+      const wordCount = line.text.split(/\s+/).length;
+      const speechDurationMs = (wordCount * 100 + 500) / this.speed;
+      await this.sleep(speechDurationMs);
+    }
   }
 
   private async processAction(line: ActionLine): Promise<void> {

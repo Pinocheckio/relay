@@ -120,6 +120,7 @@ wss.on('connection', (clientWs: WebSocket) => {
     committedText: string,
     languageCode: string,
     speakerIndex: number | null,
+    knownParticipantName?: string,
   ): Promise<void> {
     const text = committedText;
     if (!text.trim()) return;
@@ -147,7 +148,23 @@ wss.on('connection', (clientWs: WebSocket) => {
     let confident = false;
     let resolvedByDiarize = false;
 
-    if (speakerIndex !== null && speakerMap.has(speakerIndex)) {
+    // Test mode text: participant is known from the script
+    if (knownParticipantName) {
+      const knownP = session.participants.find(
+        p => p.name === knownParticipantName && p.isPresent,
+      );
+      if (knownP) {
+        detectedSpeaker = knownP.language as Speaker;
+        participant = knownP;
+        confident = true;
+        const others = activeLangs.filter(l => l !== detectedSpeaker);
+        targetSpeaker = others[0] ?? null;
+        resolvedByDiarize = true;
+        console.log(`[test] known speaker: ${knownP.name} (${detectedSpeaker})`);
+      }
+    }
+
+    if (!resolvedByDiarize && speakerIndex !== null && speakerMap.has(speakerIndex)) {
       const mappedId = speakerMap.get(speakerIndex)!;
       const mappedP = session.participants.find(p => p.id === mappedId && p.isPresent);
       if (mappedP) {
@@ -300,14 +317,14 @@ wss.on('connection', (clientWs: WebSocket) => {
           stt: msg.mode === 'audio' ? (stt ?? undefined) : undefined,
           synthesizeFn: synthesize,
           sendFn: send,
+          // Text mode: awaited callback passes participant name and waits for
+          // full pipeline (translate + TTS synthesis) before advancing.
+          onCommitText: msg.mode === 'text'
+            ? async (text, lang, participantName) => {
+                await handleCommitted(text, lang, null, participantName);
+              }
+            : undefined,
         });
-
-        // In text mode, player emits 'committed' — wire it to handleCommitted
-        if (msg.mode === 'text') {
-          testPlayer.on('committed', async (text: string, lang: string, si: number | null) => {
-            await handleCommitted(text, lang, si);
-          });
-        }
 
         send({
           type: 'participants_update',

@@ -617,6 +617,10 @@ function handleServerMessage(msg) {
     case 'test_narration':
       appendTestNarration(msg.description);
       break;
+
+    case 'test_audio_stop':
+      stopAllAudio();
+      break;
   }
 }
 
@@ -702,6 +706,7 @@ btnTestReset.addEventListener('click', () => {
   if (!ws) return;
   isTestPlaying = false;
   updateTestControls(false);
+  stopAllAudio();
   transcriptEl.innerHTML = '';
   entryElements.clear();
   testAccuracyContent.innerHTML = '';
@@ -956,11 +961,29 @@ function drainAudioQueue() {
   }
   audioQueueRunning = true;
   const { audio, url } = AUDIO_QUEUE.shift();
+  currentAudio = audio;
   audio.play().catch(() => {});
   audio.onended = () => {
+    currentAudio = null;
     URL.revokeObjectURL(url);
     drainAudioQueue();
   };
+}
+
+let currentAudio = null;
+
+function stopAllAudio() {
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio.onended = null;
+    currentAudio = null;
+  }
+  for (const { audio, url } of AUDIO_QUEUE.splice(0)) {
+    URL.revokeObjectURL(url);
+  }
+  ttsChunks.length = 0;
+  audioQueueRunning = false;
+  ttsIndicator.classList.remove('active');
 }
 
 // ── Mode switching ────────────────────────────────────────────────────────
